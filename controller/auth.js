@@ -4,26 +4,41 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 export const Signup = async (req, res) => {
   const { name, email, password } = req.body;
+  console.log("Signup attempt for:", email);
   try {
     const exisitinguser = await user.findOne({ email });
     if (exisitinguser) {
-      return res.status(404).json({ message: "User already exist" });
+      console.log("User already exists:", email);
+      return res.status(400).json({ message: "User already exist" });
     }
-    const token = jwt.sign(
-      { email: newuser.email, id: newuser._id },
-      process.env.JWT_SECRET,
-      { expiresIn: "1h" }
-    );
+    console.log("Hashing password...");
     const hashpassword = await bcrypt.hash(password, 12);
+
+    const countBefore = await user.countDocuments();
+    console.log("User count before create:", countBefore);
+
+    console.log("Creating user...");
     const newuser = await user.create({
       name,
       email,
       password: hashpassword,
     });
+
+    const countAfter = await user.countDocuments();
+    console.log("User count after create:", countAfter);
+    console.log("Created user ID:", newuser._id);
+
+    console.log("User created, generating token...");
+    const token = jwt.sign(
+      { email: newuser.email, id: newuser._id },
+      process.env.JWT_SECRET || "default_secret",
+      { expiresIn: "1h" }
+    );
+    console.log("Signup successful for:", email);
     res.status(200).json({ data: newuser, token });
   } catch (error) {
-    res.status(500).json("something went wrong..");
-    return;
+    console.error("Signup Error Detail:", error);
+    res.status(500).json({ message: error.message || "Something went wrong during signup" });
   }
 };
 export const Login = async (req, res) => {
@@ -43,13 +58,13 @@ export const Login = async (req, res) => {
     }
     const token = jwt.sign(
       { email: exisitinguser.email, id: exisitinguser._id },
-      process.env.JWT_SECRET,
+      process.env.JWT_SECRET || "default_secret",
       { expiresIn: "1h" }
     );
     res.status(200).json({ data: exisitinguser, token });
   } catch (error) {
-    res.status(500).json("something went wrong..");
-    return;
+    console.error("Login Error:", error);
+    res.status(500).json({ message: error.message || "Something went wrong during login" });
   }
 };
 export const getallusers = async (req, res) => {

@@ -13,16 +13,25 @@ app.use(cors());
 app.get("/", (req, res) => {
   res.send("Stackoverflow clone is running perfect");
 });
-app.use('/user',userroutes)
-app.use('/question',questionroute)
-app.use('/answer',answerroutes)
+app.get("/api/db-check", (req, res) => {
+  res.json({
+    host: mongoose.connection.host,
+    name: mongoose.connection.name,
+    readyState: mongoose.connection.readyState
+  });
+});
+app.use('/user', userroutes)
+app.use('/question', questionroute)
+app.use('/answer', answerroutes)
 const PORT = process.env.PORT || 5000;
-const databaseurl = process.env.MONGODB_URL;
+const databaseurl = process.env.MONGODB_URL || "mongodb://localhost:27017/stackoverflow";
 
 mongoose
   .connect(databaseurl, { useNewUrlParser: true, useUnifiedTopology: true })
   .then(() => {
     console.log("✅ Connected to MongoDB");
+    console.log("Host:", mongoose.connection.host);
+    console.log("Database:", mongoose.connection.name);
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
     });
