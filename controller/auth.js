@@ -4,43 +4,40 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { UAParser } from "ua-parser-js";
 import moment from "moment-timezone";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import LoginHistory from "../models/LoginHistory.js";
 import Otp from "../models/Otp.js";
 
 const sendOtpEmail = async (email, otp) => {
-  console.log(`Attempting to send OTP email to: ${email}`);
+  console.log(`Attempting to send OTP email via Resend to: ${email}`);
 
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-    console.error("CRITICAL: EMAIL_USER or EMAIL_PASS not set in environment variables!");
+  const resendApiKey = process.env.RESEND_API_KEY;
+
+  if (!resendApiKey) {
+    console.error("CRITICAL: RESEND_API_KEY not set in environment variables!");
     console.log("DEV ONLY - OTP is:", otp);
     return;
   }
 
-  const transporter = nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-    debug: true, // Show debug output
-    logger: true // Log information in console
-  });
-
-  const mailOptions = {
-    from: `"Stack Overflow Clone" <${process.env.EMAIL_USER}>`,
-    to: email,
-    subject: "Your Login OTP",
-    text: `Your OTP for login is: ${otp}. It will expire in 5 minutes.`,
-    html: `<b>Your OTP for login is: ${otp}</b><br>It will expire in 5 minutes.`,
-  };
+  const resend = new Resend(resendApiKey);
 
   try {
-    const info = await transporter.sendMail(mailOptions);
-    console.log("OTP Email sent successfully. Message ID:", info.messageId);
+    const { data, error } = await resend.emails.send({
+      from: "onboarding@resend.dev", // Default sender for non-domain verified accounts
+      to: email,
+      subject: "Your Login OTP",
+      html: `<strong>Your OTP for login is: ${otp}</strong><br>It will expire in 5 minutes.`,
+    });
+
+    if (error) {
+      console.error("Resend Error:", error);
+      console.log("DEBUG - Generated OTP was:", otp);
+      return;
+    }
+
+    console.log("OTP Email sent successfully via Resend. ID:", data.id);
   } catch (error) {
-    console.error("Error sending OTP email:", error);
-    // In production, we usually don't want to log the OTP, but since this is dev/learning...
+    console.error("Unexpected error sending OTP email:", error);
     console.log("DEBUG - Generated OTP was:", otp);
   }
 };
