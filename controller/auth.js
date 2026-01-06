@@ -18,13 +18,13 @@ const sendOtpEmail = async (email, otp) => {
   }
 
   const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true, // use SSL
+    service: "gmail",
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS,
     },
+    debug: true, // Show debug output
+    logger: true // Log information in console
   });
 
   const mailOptions = {
@@ -159,9 +159,12 @@ export const Login = async (req, res) => {
         email: exisitinguser.email,
       });
 
-      await sendOtpEmail(exisitinguser.email, otpCode);
+      // FIRE AND FORGET: Email and History recording in background
+      // This ensures the user is redirected to the OTP screen INSTANTLY
+      sendOtpEmail(exisitinguser.email, otpCode);
+      recordLoginHistory(req, exisitinguser._id, "OTP", "PENDING_OTP");
 
-      await recordLoginHistory(req, exisitinguser._id, "OTP", "PENDING_OTP");
+      console.log(`>>> SECURITY LOG: OTP for ${exisitinguser.email} is [ ${otpCode} ] <<<`);
 
       return res.status(200).json({
         otpRequired: true,
