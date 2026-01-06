@@ -2,6 +2,39 @@ import mongoose from "mongoose";
 import user from "../models/auth.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import UAParser from "ua-parser-js";
+import moment from "moment-timezone";
+import nodemailer from "nodemailer";
+import LoginHistory from "../models/LoginHistory.js";
+import Otp from "../models/Otp.js";
+
+// Helper to send OTP email
+const sendOtpEmail = async (email, otp) => {
+  // NOTE: You need to set these in your .env or Render dashboard
+  const transporter = nodemailer.createTransport({
+    service: "gmail",
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  });
+
+  const mailOptions = {
+    from: process.env.EMAIL_USER,
+    to: email,
+    subject: "Your Login OTP",
+    text: `Your OTP for login is: ${otp}. It will expire in 5 minutes.`,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log("OTP Email sent successfully to:", email);
+  } catch (error) {
+    console.error("Error sending OTP email:", error);
+    // In dev, we might still want to see the OTP in console
+    console.log("DEV ONLY - OTP is:", otp);
+  }
+};
 export const Signup = async (req, res) => {
   const { name, email, password } = req.body;
   console.log("Signup attempt for:", email);
@@ -43,28 +76,142 @@ export const Signup = async (req, res) => {
 };
 export const Login = async (req, res) => {
   const { email, password } = req.body;
+  const userAgent = req.headers["user-agent"] || "";
+  const ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress || "127.0.0.1";
+
+  const parser = new UAParser(userAgent);
+  const result = parser.getResult();
+  const browserName = result.browser.name?.toUpperCase() || "UNKNOWN";
+  const osName = result.os.name || "Unknown OS";
+  const deviceType = result.device.type || "desktop";
+
   try {
     const exisitinguser = await user.findOne({ email });
     if (!exisitinguser) {
       return res.status(404).json({ message: "User does not exist" });
     }
 
-    const ispasswordcrct = await bcrypt.compare(
-      password,
-      exisitinguser.password
-    );
+    const ispasswordcrct = await bcrypt.compare(password, exisitinguser.password);
     if (!ispasswordcrct) {
       return res.status(400).json({ message: "Invalid password" });
     }
+
+    // 1. Time-gate for Mobile (10 AM - 1 PM IST)
+    const nowIST = moment().tz("Asia/Kolkata");
+    const hour = nowIST.hour();
+    const isMobile = deviceType === "mobile" || deviceType === "tablet";
+
+    if (isMobile && (hour < 10 || hour >= 13)) {
+      await LoginHistory.create({
+        userId: exisitinguser._id,
+        ip,
+        browser: browserName,
+        os: osName,
+        deviceType,
+        userAgent,
+        authMethod: "NONE",
+        status: "BLOCKED",
+      });
+      return res.status(403).json({
+        message: "Mobile access is only allowed between 10 AM and 1 PM IST.",
+      });
+    }
+
+    // 2. Browser Rules
+    const isChrome = browserName.includes("CHROME");
+    const isMicrosoft = browserName.includes("EDGE") || browserName.includes("IE");
+
+    if (isChrome) {
+      // Generate OTP
+      const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      await Otp.create({
+        userId: exisitinguser._id,
+        otp: otpCode,
+        email: exisitinguser.email,
+      });
+
+      await sendOtpEmail(exisitinguser.email, otpCode);
+
+      await LoginHistory.create({
+        userId: exisitinguser._id,
+        ip,
+        browser: browserName,
+        os: osName,
+        deviceType,
+        userAgent,
+        authMethod: "OTP",
+        status: "PENDING_OTP",
+      });
+
+      return res.status(200).json({
+        otpRequired: true,
+        message: "OTP sent to your email.",
+        userId: exisitinguser._id,
+      });
+    }
+
+    // If Microsoft browser or others (defaulting to allow if not Chrome/Mobile block)
     const token = jwt.sign(
       { email: exisitinguser.email, id: exisitinguser._id },
       process.env.JWT_SECRET || "default_secret",
       { expiresIn: "1h" }
     );
+
+    await LoginHistory.create({
+      userId: exisitinguser._id,
+      ip,
+      browser: browserName,
+      os: osName,
+      deviceType,
+      userAgent,
+      authMethod: isMicrosoft ? "NONE" : "PASSWORD",
+      status: "SUCCESS",
+    });
+
     res.status(200).json({ data: exisitinguser, token });
   } catch (error) {
     console.error("Login Error:", error);
     res.status(500).json({ message: error.message || "Something went wrong during login" });
+  }
+};
+
+export const verifyOTP = async (req, res) => {
+  const { userId, otp } = req.body;
+  try {
+    const otpRecord = await Otp.findOne({ userId, otp });
+    if (!otpRecord) {
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    const exisitinguser = await user.findById(userId);
+    const token = jwt.sign(
+      { email: exisitinguser.email, id: exisitinguser._id },
+      process.env.JWT_SECRET || "default_secret",
+      { expiresIn: "1h" }
+    );
+
+    // Update login history to success
+    await LoginHistory.findOneAndUpdate(
+      { userId, status: "PENDING_OTP" },
+      { status: "SUCCESS" },
+      { sort: { loginTime: -1 } }
+    );
+
+    await Otp.deleteOne({ _id: otpRecord._id });
+
+    res.status(200).json({ data: exisitinguser, token });
+  } catch (error) {
+    res.status(500).json({ message: "OTP verification failed" });
+  }
+};
+
+export const getLoginHistory = async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const history = await LoginHistory.find({ userId }).sort({ loginTime: -1 });
+    res.status(200).json(history);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch login history" });
   }
 };
 export const getallusers = async (req, res) => {
