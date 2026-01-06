@@ -23,7 +23,7 @@ const sendOtpEmail = async (email, otp) => {
 
   try {
     const response = await resend.emails.send({
-      from: "StackOverflow <onboarding@resend.dev>",
+      from: "StackOverflow <auth@shivrajtaware.in>",
       to: email,
       subject: "Your Login OTP",
       html: `<strong>Your OTP for login is: ${otp}</strong><br>It will expire in 5 minutes.`,
