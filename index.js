@@ -5,11 +5,15 @@ import mongoose from "mongoose";
 import userroutes from "./routes/auth.js"
 import questionroute from "./routes/question.js"
 import answerroutes from "./routes/answer.js"
+import timeGate from "./middleware/timeGate.js";
+
 const app = express();
 dotenv.config();
 app.use(express.json({ limit: "30mb", extended: true }));
 app.use(express.urlencoded({ limit: "30mb", extended: true }));
 app.use(cors());
+app.use(timeGate);
+
 app.get("/", (req, res) => {
   res.send("Stackoverflow clone is running perfect");
 });

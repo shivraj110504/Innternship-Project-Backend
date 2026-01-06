@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import user from "../models/auth.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import UAParser from "ua-parser-js";
+import { UAParser } from "ua-parser-js";
 import moment from "moment-timezone";
 import nodemailer from "nodemailer";
 import LoginHistory from "../models/LoginHistory.js";
@@ -35,6 +35,34 @@ const sendOtpEmail = async (email, otp) => {
     console.log("DEV ONLY - OTP is:", otp);
   }
 };
+
+// Helper to record login history
+const recordLoginHistory = async (req, userId, authMethod, status) => {
+  const userAgent = req.headers["user-agent"] || "";
+  const ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress || "127.0.0.1";
+
+  const parser = new UAParser(userAgent);
+  const result = parser.getResult();
+  const browserName = result.browser.name?.toUpperCase() || "UNKNOWN";
+  const osName = result.os.name || "Unknown OS";
+  const deviceType = result.device.type || "desktop";
+
+  try {
+    await LoginHistory.create({
+      userId,
+      ip,
+      browser: browserName,
+      os: osName,
+      deviceType,
+      userAgent,
+      authMethod,
+      status,
+    });
+  } catch (error) {
+    console.error("Failed to record login history:", error);
+  }
+};
+
 export const Signup = async (req, res) => {
   const { name, email, password } = req.body;
   console.log("Signup attempt for:", email);
@@ -67,6 +95,10 @@ export const Signup = async (req, res) => {
       process.env.JWT_SECRET || "default_secret",
       { expiresIn: "1h" }
     );
+
+    // Record signup as first login
+    await recordLoginHistory(req, newuser._id, "PASSWORD", "SUCCESS");
+
     console.log("Signup successful for:", email);
     res.status(200).json({ data: newuser, token });
   } catch (error) {
@@ -77,12 +109,9 @@ export const Signup = async (req, res) => {
 export const Login = async (req, res) => {
   const { email, password } = req.body;
   const userAgent = req.headers["user-agent"] || "";
-  const ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress || "127.0.0.1";
-
   const parser = new UAParser(userAgent);
   const result = parser.getResult();
   const browserName = result.browser.name?.toUpperCase() || "UNKNOWN";
-  const osName = result.os.name || "Unknown OS";
   const deviceType = result.device.type || "desktop";
 
   try {
@@ -102,16 +131,7 @@ export const Login = async (req, res) => {
     const isMobile = deviceType === "mobile" || deviceType === "tablet";
 
     if (isMobile && (hour < 10 || hour >= 13)) {
-      await LoginHistory.create({
-        userId: exisitinguser._id,
-        ip,
-        browser: browserName,
-        os: osName,
-        deviceType,
-        userAgent,
-        authMethod: "NONE",
-        status: "BLOCKED",
-      });
+      await recordLoginHistory(req, exisitinguser._id, "NONE", "BLOCKED");
       return res.status(403).json({
         message: "Mobile access is only allowed between 10 AM and 1 PM IST.",
       });
@@ -132,16 +152,7 @@ export const Login = async (req, res) => {
 
       await sendOtpEmail(exisitinguser.email, otpCode);
 
-      await LoginHistory.create({
-        userId: exisitinguser._id,
-        ip,
-        browser: browserName,
-        os: osName,
-        deviceType,
-        userAgent,
-        authMethod: "OTP",
-        status: "PENDING_OTP",
-      });
+      await recordLoginHistory(req, exisitinguser._id, "OTP", "PENDING_OTP");
 
       return res.status(200).json({
         otpRequired: true,
@@ -157,16 +168,7 @@ export const Login = async (req, res) => {
       { expiresIn: "1h" }
     );
 
-    await LoginHistory.create({
-      userId: exisitinguser._id,
-      ip,
-      browser: browserName,
-      os: osName,
-      deviceType,
-      userAgent,
-      authMethod: isMicrosoft ? "NONE" : "PASSWORD",
-      status: "SUCCESS",
-    });
+    await recordLoginHistory(req, exisitinguser._id, isMicrosoft ? "NONE" : "PASSWORD", "SUCCESS");
 
     res.status(200).json({ data: exisitinguser, token });
   } catch (error) {
