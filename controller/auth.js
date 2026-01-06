@@ -8,11 +8,19 @@ import nodemailer from "nodemailer";
 import LoginHistory from "../models/LoginHistory.js";
 import Otp from "../models/Otp.js";
 
-// Helper to send OTP email
 const sendOtpEmail = async (email, otp) => {
-  // NOTE: You need to set these in your .env or Render dashboard
+  console.log(`Attempting to send OTP email to: ${email}`);
+
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.error("CRITICAL: EMAIL_USER or EMAIL_PASS not set in environment variables!");
+    console.log("DEV ONLY - OTP is:", otp);
+    return;
+  }
+
   const transporter = nodemailer.createTransport({
-    service: "gmail",
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true, // use SSL
     auth: {
       user: process.env.EMAIL_USER,
       pass: process.env.EMAIL_PASS,
@@ -20,19 +28,20 @@ const sendOtpEmail = async (email, otp) => {
   });
 
   const mailOptions = {
-    from: process.env.EMAIL_USER,
+    from: `"Stack Overflow Clone" <${process.env.EMAIL_USER}>`,
     to: email,
     subject: "Your Login OTP",
     text: `Your OTP for login is: ${otp}. It will expire in 5 minutes.`,
+    html: `<b>Your OTP for login is: ${otp}</b><br>It will expire in 5 minutes.`,
   };
 
   try {
-    await transporter.sendMail(mailOptions);
-    console.log("OTP Email sent successfully to:", email);
+    const info = await transporter.sendMail(mailOptions);
+    console.log("OTP Email sent successfully. Message ID:", info.messageId);
   } catch (error) {
     console.error("Error sending OTP email:", error);
-    // In dev, we might still want to see the OTP in console
-    console.log("DEV ONLY - OTP is:", otp);
+    // In production, we usually don't want to log the OTP, but since this is dev/learning...
+    console.log("DEBUG - Generated OTP was:", otp);
   }
 };
 
