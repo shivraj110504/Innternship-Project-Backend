@@ -9,36 +9,40 @@ import LoginHistory from "../models/LoginHistory.js";
 import Otp from "../models/Otp.js";
 
 const sendOtpEmail = async (email, otp) => {
-  console.log(`Attempting to send OTP email via Resend to: ${email}`);
+  console.log(`[RESEND] Attempting to send OTP email to: ${email}`);
 
   const resendApiKey = process.env.RESEND_API_KEY;
 
   if (!resendApiKey) {
-    console.error("CRITICAL: RESEND_API_KEY not set in environment variables!");
-    console.log("DEV ONLY - OTP is:", otp);
+    console.error("[RESEND] CRITICAL: RESEND_API_KEY not set!");
+    console.log("[DEBUG] OTP is:", otp);
     return;
   }
 
   const resend = new Resend(resendApiKey);
 
   try {
-    const { data, error } = await resend.emails.send({
-      from: "onboarding@resend.dev", // Default sender for non-domain verified accounts
+    const response = await resend.emails.send({
+      from: "StackOverflow <onboarding@resend.dev>",
       to: email,
       subject: "Your Login OTP",
       html: `<strong>Your OTP for login is: ${otp}</strong><br>It will expire in 5 minutes.`,
     });
 
-    if (error) {
-      console.error("Resend Error:", error);
-      console.log("DEBUG - Generated OTP was:", otp);
+    if (response.error) {
+      console.error("[RESEND] API returned an error:", JSON.stringify(response.error, null, 2));
+      console.log("[DEBUG] OTP Code for manual login:", otp);
+
+      if (response.error.name === "validation_error" && response.error.message.includes("to authorized email")) {
+        console.warn("[RESEND] TIP: When using a new Resend account, you can ONLY send emails to yourself (your signup email). To send to others, you must verify a domain.");
+      }
       return;
     }
 
-    console.log("OTP Email sent successfully via Resend. ID:", data.id);
-  } catch (error) {
-    console.error("Unexpected error sending OTP email:", error);
-    console.log("DEBUG - Generated OTP was:", otp);
+    console.log("[RESEND] Success! Message ID:", response.data.id);
+  } catch (err) {
+    console.error("[RESEND] Unexpected system error:", err);
+    console.log("[DEBUG] OTP Code for manual login:", otp);
   }
 };
 
