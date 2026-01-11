@@ -9,6 +9,7 @@ const userSchema = new mongoose.Schema({
   phoneVerified: { type: Boolean, default: false },
 
   forgotPasswordAt: { type: Date },
+  friends: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
 
   about: String,
   tags: [String],

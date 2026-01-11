@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import userroutes from "./routes/auth.js"
 import questionroute from "./routes/question.js"
 import answerroutes from "./routes/answer.js"
+import postroutes from "./routes/post.js"
 import timeGate from "./middleware/timeGate.js";
 
 const app = express();
@@ -27,6 +28,7 @@ app.get("/api/db-check", (req, res) => {
 app.use('/user', userroutes)
 app.use('/question', questionroute)
 app.use('/answer', answerroutes)
+app.use('/post', postroutes)
 const PORT = process.env.PORT || 5000;
 const databaseurl = process.env.MONGODB_URL || "mongodb://localhost:27017/stackoverflow";
 
