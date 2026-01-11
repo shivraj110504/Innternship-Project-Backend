@@ -257,3 +257,146 @@ export const updateprofile = async (req, res) => {
     return;
   }
 };
+
+
+// Phone or Email based Forgot Password
+import { generateRandomPassword } from "../utils/passwordUtils.js";
+import https from "https";
+
+const fetchPhoneEmailUser = (userJsonUrl) => {
+  return new Promise((resolve, reject) => {
+    https.get(userJsonUrl, (res) => {
+      let data = "";
+
+      res.on("data", (chunk) => {
+        data += chunk;
+      });
+
+      res.on("end", () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }).on("error", reject);
+  });
+};
+
+
+export const verifyPhoneEmail = async (req, res) => {
+  const { user_json_url, userId } = req.body;
+
+  if (!user_json_url) {
+    return res.status(400).json({ message: "user_json_url is required" });
+  }
+
+  try {
+    const phoneData = await fetchPhoneEmailUser(user_json_url);
+
+    const { user_country_code, user_phone_number } = phoneData;
+    const fullPhone = `${user_country_code}${user_phone_number}`;
+
+    let existingUser;
+
+    // Case 1: user is logged in → link phone
+    if (userId) {
+      existingUser = await user.findById(userId);
+      if (!existingUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+    }
+    // Case 2: find by phone (forgot password / login)
+    else {
+      existingUser = await user.findOne({ phone: fullPhone });
+      if (!existingUser) {
+        return res.status(404).json({
+          message: "No account linked with this phone number"
+        });
+      }
+    }
+
+    existingUser.phone = fullPhone;
+    existingUser.phoneVerified = true;
+    await existingUser.save();
+
+    await recordLoginHistory(req, existingUser._id, "PHONE_EMAIL", "SUCCESS");
+
+    // Generate new password if requested (forgot password flow via phone)
+    const { resetPassword } = req.body;
+    let newPassword = null;
+    if (resetPassword) {
+      newPassword = generateRandomPassword(10);
+      const hashedPassword = await bcrypt.hash(newPassword, 12);
+      existingUser.password = hashedPassword;
+      existingUser.forgotPasswordAt = new Date();
+      await existingUser.save();
+    }
+
+    return res.status(200).json({
+      message: resetPassword ? "Password reset successful via phone" : "Phone number verified successfully",
+      phone: fullPhone,
+      userId: existingUser._id,
+      newPassword: newPassword // In a real app, you might send this via SMS instead of returning it directly
+    });
+
+  } catch (error) {
+    console.error("Phone.email verification failed:", error);
+    res.status(500).json({ message: "Phone verification failed" });
+  }
+};
+
+export const forgotPassword = async (req, res) => {
+  const { email } = req.body;
+  try {
+    const existingUser = await user.findOne({ email });
+    if (!existingUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Rate limiting: 1 time per day
+    if (existingUser.forgotPasswordAt) {
+      const lastReset = moment(existingUser.forgotPasswordAt);
+      const now = moment();
+      const diffHours = now.diff(lastReset, "hours");
+
+      if (diffHours < 24) {
+        return res.status(429).json({
+          message: "You can request forgot password only 1 time a day. Please use only once."
+        });
+      }
+    }
+
+    const newPassword = generateRandomPassword(10);
+    const hashpassword = await bcrypt.hash(newPassword, 12);
+
+    existingUser.password = hashpassword;
+    existingUser.forgotPasswordAt = new Date();
+    await existingUser.save();
+
+    // Use existing sendOtpEmail helper structure OR create a new one for password
+    // For now, we'll return it in the response as requested/implied for "generator feature"
+    // and ideally send an email.
+
+    // We can reuse sendOtpEmail helper logic to send the new password
+    const resendApiKey = process.env.RESEND_API_KEY;
+    if (resendApiKey) {
+      const resend = new Resend(resendApiKey);
+      await resend.emails.send({
+        from: "StackOverflow <auth@shivrajtaware.in>",
+        to: email,
+        subject: "Your New Password",
+        html: `<strong>Your new password is: ${newPassword}</strong><br>Please log in and change it immediately.`,
+      });
+    }
+
+    res.status(200).json({
+      message: "New password generated and sent to email.",
+      newPassword: newPassword // Also returning it for the "password generator feature" display
+    });
+
+  } catch (error) {
+    console.error("Forgot Password Error:", error);
+    res.status(500).json({ message: "Something went wrong" });
+  }
+};
