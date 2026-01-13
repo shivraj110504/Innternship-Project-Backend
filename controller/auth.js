@@ -95,6 +95,11 @@ export const Signup = async (req, res) => {
       name,
       email,
       password: hashpassword,
+      followers: [],
+      following: [],
+      goldBadges: 0,
+      silverBadges: 0,
+      bronzeBadges: 0,
     });
 
     const countAfter = await user.countDocuments();
