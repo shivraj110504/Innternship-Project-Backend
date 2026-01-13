@@ -190,6 +190,14 @@ export const Login = async (req, res) => {
 
     await recordLoginHistory(req, exisitinguser._id, isMicrosoft ? "NONE" : "PASSWORD", "SUCCESS");
 
+    // RESET social stats on every login as per project requirements
+    exisitinguser.followers = [];
+    exisitinguser.following = [];
+    exisitinguser.goldBadges = 0;
+    exisitinguser.silverBadges = 0;
+    exisitinguser.bronzeBadges = 0;
+    await exisitinguser.save();
+
     res.status(200).json({ data: exisitinguser, token });
   } catch (error) {
     console.error("Login Error:", error);
@@ -220,6 +228,14 @@ export const verifyOTP = async (req, res) => {
     );
 
     await Otp.deleteOne({ _id: otpRecord._id });
+
+    // RESET social stats on every login as per project requirements
+    exisitinguser.followers = [];
+    exisitinguser.following = [];
+    exisitinguser.goldBadges = 0;
+    exisitinguser.silverBadges = 0;
+    exisitinguser.bronzeBadges = 0;
+    await exisitinguser.save();
 
     res.status(200).json({ data: exisitinguser, token });
   } catch (error) {

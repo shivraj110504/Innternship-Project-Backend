@@ -17,7 +17,7 @@ export const Askquestion = async (req, res) => {
 
     // Rule: if no followers (friends), cannot post
     if (followerCount === 0) {
-      return res.status(403).json({ message: "You cannot post any questions until you have followers (friends)." });
+      return res.status(403).json({ message: "You are not allowed to post. You need at least 1 follower to ask questions." });
     }
 
     // Rule: Posting limit logic
