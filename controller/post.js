@@ -153,12 +153,13 @@ export const searchUsers = async (req, res) => {
     if (!query) return res.status(200).json([]);
 
     try {
+        const cleanQuery = query.replace(/^@/, "");
         const users = await User.find({
             $or: [
-                { name: { $regex: query, $options: "i" } },
-                { email: { $regex: query, $options: "i" } }
+                { name: { $regex: cleanQuery, $options: "i" } },
+                { email: { $regex: cleanQuery, $options: "i" } }
             ]
-        }).select("name email followers following");
+        }).select("name email followers following joinDate about tags");
         res.status(200).json(users);
     } catch (error) {
         res.status(500).json({ message: error.message });
