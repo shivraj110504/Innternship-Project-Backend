@@ -125,16 +125,20 @@ export const followUser = async (req, res) => {
         const isFollowing = user.following.includes(followId);
 
         if (!isFollowing) {
-            // Follow
+            // Mutual Follow
             user.following.push(followId);
+            user.followers.push(followId); // A follows B, A gets a follower B
             targetUser.followers.push(userId);
+            targetUser.following.push(userId); // B gets follower A, B follows A
             await user.save();
             await targetUser.save();
             res.status(200).json({ message: "Followed successfully", isFollowing: true });
         } else {
-            // Unfollow
+            // Mutual Unfollow
             user.following = user.following.filter(id => id.toString() !== followId);
+            user.followers = user.followers.filter(id => id.toString() !== followId);
             targetUser.followers = targetUser.followers.filter(id => id.toString() !== userId);
+            targetUser.following = targetUser.following.filter(id => id.toString() !== userId);
             await user.save();
             await targetUser.save();
             res.status(200).json({ message: "Unfollowed successfully", isFollowing: false });
@@ -146,9 +150,14 @@ export const followUser = async (req, res) => {
 
 export const searchUsers = async (req, res) => {
     const { query } = req.query;
+    if (!query) return res.status(200).json([]);
+
     try {
         const users = await User.find({
-            name: { $regex: query, $options: "i" }
+            $or: [
+                { name: { $regex: query, $options: "i" } },
+                { email: { $regex: query, $options: "i" } }
+            ]
         }).select("name email followers following");
         res.status(200).json(users);
     } catch (error) {
