@@ -12,11 +12,12 @@ export const createPost = async (req, res) => {
         const user = await User.findById(userId);
         if (!user) return res.status(404).json({ message: "User not found" });
 
-        const friendCount = user.friends ? user.friends.length : 0;
+        const followerCount = user.followers ? user.followers.length : 0;
+        const followingCount = user.following ? user.following.length : 0;
 
-        // Rule: if no friends, cannot post
-        if (friendCount === 0) {
-            return res.status(403).json({ message: "You cannot post anything on the public page until you have friends." });
+        // Rule: if no followers (friends), cannot post
+        if (followerCount === 0) {
+            return res.status(403).json({ message: "You cannot post anything on the public page until you have followers (friends)." });
         }
 
         // Rule: Posting limit logic
@@ -28,14 +29,14 @@ export const createPost = async (req, res) => {
             createdAt: { $gte: today },
         });
 
-        if (friendCount >= 1 && friendCount <= 10) {
-            if (postsToday >= friendCount) {
+        if (followerCount >= 1 && followerCount <= 10) {
+            if (postsToday >= followerCount) {
                 return res.status(429).json({
-                    message: `You can post only ${friendCount} time${friendCount > 1 ? "s" : ""} a day based on your friend count.`,
+                    message: `You can post only ${followerCount} time${followerCount > 1 ? "s" : ""} a day based on your follower count.`,
                 });
             }
         }
-        // If friendCount > 10, no limit (multiple times)
+        // If followerCount > 10, no limit (multiple times)
 
         const newPost = await Post.create({
             userId,
@@ -108,32 +109,48 @@ export const commentPost = async (req, res) => {
     }
 };
 
-export const addFriend = async (req, res) => {
-    const { friendId } = req.body;
+export const followUser = async (req, res) => {
+    const { followId } = req.body;
     const userId = req.userid;
 
     if (!userId) return res.status(403).json({ message: "Unauthenticated" });
+    if (userId === followId) return res.status(400).json({ message: "You cannot follow yourself" });
 
     try {
         const user = await User.findById(userId);
-        const friend = await User.findById(friendId);
+        const targetUser = await User.findById(followId);
 
-        if (!friend) return res.status(404).json({ message: "Friend user not found" });
+        if (!targetUser) return res.status(404).json({ message: "User not found" });
 
-        if (!user.friends.includes(friendId)) {
-            user.friends.push(friendId);
+        const isFollowing = user.following.includes(followId);
+
+        if (!isFollowing) {
+            // Follow
+            user.following.push(followId);
+            targetUser.followers.push(userId);
             await user.save();
-
-            // Mutual friendship
-            if (!friend.friends.includes(userId)) {
-                friend.friends.push(userId);
-                await friend.save();
-            }
-
-            res.status(200).json({ message: "Friend added successfully" });
+            await targetUser.save();
+            res.status(200).json({ message: "Followed successfully", isFollowing: true });
         } else {
-            res.status(400).json({ message: "Already friends" });
+            // Unfollow
+            user.following = user.following.filter(id => id.toString() !== followId);
+            targetUser.followers = targetUser.followers.filter(id => id.toString() !== userId);
+            await user.save();
+            await targetUser.save();
+            res.status(200).json({ message: "Unfollowed successfully", isFollowing: false });
         }
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const searchUsers = async (req, res) => {
+    const { query } = req.query;
+    try {
+        const users = await User.find({
+            name: { $regex: query, $options: "i" }
+        }).select("name email followers following");
+        res.status(200).json(users);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }

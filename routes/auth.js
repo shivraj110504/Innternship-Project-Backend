@@ -8,7 +8,8 @@ import {
   verifyOTP,
   getLoginHistory,
   verifyPhoneEmail,
-  forgotPassword
+  forgotPassword,
+  getUser
 } from "../controller/auth.js";
 
 const router = express.Router();
@@ -19,5 +20,6 @@ router.post("/verify-phone-email", verifyPhoneEmail);
 router.post("/forgot-password", forgotPassword);
 router.get("/login-history/:userId", auth, getLoginHistory);
 router.get("/getalluser", getallusers);
+router.get("/get-user/:id", getUser);
 router.patch("/update/:id", auth, updateprofile);
 export default router;

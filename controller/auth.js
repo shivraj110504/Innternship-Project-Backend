@@ -7,6 +7,8 @@ import moment from "moment-timezone";
 import { Resend } from "resend";
 import LoginHistory from "../models/LoginHistory.js";
 import Otp from "../models/Otp.js";
+import { generateRandomPassword } from "../utils/passwordUtils.js";
+import https from "https";
 
 const sendOtpEmail = async (email, otp) => {
   console.log(`[RESEND] Attempting to send OTP email to: ${email}`);
@@ -258,10 +260,17 @@ export const updateprofile = async (req, res) => {
   }
 };
 
+export const getUser = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const userData = await user.findById(id).select("-password -phone");
+    if (!userData) return res.status(404).json({ message: "User not found" });
+    res.status(200).json(userData);
+  } catch (error) {
+    res.status(500).json({ message: "Something went wrong" });
+  }
+};
 
-// Phone or Email based Forgot Password
-import { generateRandomPassword } from "../utils/passwordUtils.js";
-import https from "https";
 
 const fetchPhoneEmailUser = (userJsonUrl) => {
   return new Promise((resolve, reject) => {
