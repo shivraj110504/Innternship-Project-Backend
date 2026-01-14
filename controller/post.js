@@ -125,20 +125,16 @@ export const followUser = async (req, res) => {
         const isFollowing = user.following.includes(followId);
 
         if (!isFollowing) {
-            // Mutual Follow
-            user.following.push(followId);
-            user.followers.push(followId); // A follows B, A gets a follower B
-            targetUser.followers.push(userId);
-            targetUser.following.push(userId); // B gets follower A, B follows A
+            // Asymmetric Follow: only update respective arrays
+            user.following.push(followId);           // Add to YOUR following list
+            targetUser.followers.push(userId);       // Add YOU to THEIR followers list
             await user.save();
             await targetUser.save();
             res.status(200).json({ message: "Followed successfully", isFollowing: true });
         } else {
-            // Mutual Unfollow
+            // Unfollow: remove from respective arrays
             user.following = user.following.filter(id => id.toString() !== followId);
-            user.followers = user.followers.filter(id => id.toString() !== followId);
             targetUser.followers = targetUser.followers.filter(id => id.toString() !== userId);
-            targetUser.following = targetUser.following.filter(id => id.toString() !== userId);
             await user.save();
             await targetUser.save();
             res.status(200).json({ message: "Unfollowed successfully", isFollowing: false });
@@ -165,6 +161,51 @@ export const searchUsers = async (req, res) => {
         res.status(200).json(users);
     } catch (error) {
         console.error("Search error:", error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const getFollowers = async (req, res) => {
+    const userId = req.userid;
+
+    if (!userId) return res.status(403).json({ message: "Unauthenticated" });
+
+    try {
+        const user = await User.findById(userId).populate('followers', 'name email joinDate');
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        res.status(200).json(user.followers);
+    } catch (error) {
+        console.error("Get followers error:", error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const removeFollower = async (req, res) => {
+    const { followerId } = req.params;
+    const userId = req.userid;
+
+    if (!userId) return res.status(403).json({ message: "Unauthenticated" });
+    if (userId === followerId) return res.status(400).json({ message: "Invalid operation" });
+
+    try {
+        const user = await User.findById(userId);
+        const follower = await User.findById(followerId);
+
+        if (!follower) return res.status(404).json({ message: "Follower not found" });
+
+        // Remove follower from YOUR followers list
+        user.followers = user.followers.filter(id => id.toString() !== followerId);
+
+        // Remove YOU from THEIR following list
+        follower.following = follower.following.filter(id => id.toString() !== userId);
+
+        await user.save();
+        await follower.save();
+
+        res.status(200).json({ message: "Follower removed successfully" });
+    } catch (error) {
+        console.error("Remove follower error:", error);
         res.status(500).json({ message: error.message });
     }
 };
