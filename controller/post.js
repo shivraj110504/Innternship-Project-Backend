@@ -160,8 +160,11 @@ export const searchUsers = async (req, res) => {
                 { email: { $regex: cleanQuery, $options: "i" } }
             ]
         }).select("name email followers following joinDate about tags");
+
+        console.log(`Search for "${query}" found ${users.length} users`);
         res.status(200).json(users);
     } catch (error) {
+        console.error("Search error:", error);
         res.status(500).json({ message: error.message });
     }
 };
