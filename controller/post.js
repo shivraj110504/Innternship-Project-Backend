@@ -200,6 +200,12 @@ export const removeFollower = async (req, res) => {
         // Remove YOU from THEIR following list
         follower.following = follower.following.filter(id => id.toString() !== userId);
 
+        // ALSO remove them from YOUR following list (if you were following them)
+        user.following = user.following.filter(id => id.toString() !== followerId);
+
+        // ALSO remove you from THEIR followers list (if they had you as follower)
+        follower.followers = follower.followers.filter(id => id.toString() !== userId);
+
         await user.save();
         await follower.save();
 
