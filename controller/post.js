@@ -12,15 +12,15 @@ export const createPost = async (req, res) => {
         const user = await User.findById(userId);
         if (!user) return res.status(404).json({ message: "User not found" });
 
-        const followerCount = user.followers ? user.followers.length : 0;
-        const followingCount = user.following ? user.following.length : 0;
+        // Define 'friends' as number of people the user follows
+        const friendsCount = Array.isArray(user.following) ? user.following.length : 0;
 
-        // Rule: if no followers (friends), cannot post
-        if (followerCount === 0) {
-            return res.status(403).json({ message: "You cannot post anything on the public page until you have followers (friends)." });
+        // Rule: if no friends, cannot post
+        if (friendsCount === 0) {
+            return res.status(403).json({ message: "You cannot post anything on the public page until you have at least 1 friend." });
         }
 
-        // Rule: Posting limit logic
+        // Rule: Posting limit logic based on friends count
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
@@ -29,14 +29,14 @@ export const createPost = async (req, res) => {
             createdAt: { $gte: today },
         });
 
-        if (followerCount >= 1 && followerCount <= 10) {
-            if (postsToday >= followerCount) {
+        if (friendsCount >= 1 && friendsCount <= 10) {
+            if (postsToday >= friendsCount) {
                 return res.status(429).json({
-                    message: `You can post only ${followerCount} time${followerCount > 1 ? "s" : ""} a day based on your follower count.`,
+                    message: `You can post only ${friendsCount} time${friendsCount > 1 ? "s" : ""} a day based on your friends count.`,
                 });
             }
         }
-        // If followerCount > 10, no limit (multiple times)
+        // If friendsCount > 10, no limit (multiple times)
 
         const newPost = await Post.create({
             userId,
@@ -122,7 +122,7 @@ export const followUser = async (req, res) => {
 
         if (!targetUser) return res.status(404).json({ message: "User not found" });
 
-        const isFollowing = user.following.includes(followId);
+        const isFollowing = (user.following || []).some((id) => id.toString() === String(followId));
 
         if (!isFollowing) {
             // Asymmetric Follow: only update respective arrays
