@@ -49,6 +49,35 @@ const sendOtpEmail = async (email, otp) => {
   }
 };
 
+// Change password for authenticated user
+export const changePassword = async (req, res) => {
+  try {
+    const userId = req.userId; // set by auth middleware
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: "Current and new password are required" });
+    }
+
+    const existing = await user.findById(userId);
+    if (!existing) return res.status(404).json({ message: "User not found" });
+
+    const ok = await bcrypt.compare(currentPassword, existing.password);
+    if (!ok) return res.status(400).json({ message: "Current password is incorrect" });
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: "New password must be at least 6 characters" });
+    }
+
+    const hash = await bcrypt.hash(newPassword, 12);
+    existing.password = hash;
+    await existing.save();
+    return res.status(200).json({ message: "Password changed successfully" });
+  } catch (error) {
+    console.error("Change Password Error:", error);
+    return res.status(500).json({ message: "Failed to change password" });
+  }
+};
+
 // Send reset OTP by phone directly
 export const forgotPasswordByPhone = async (req, res) => {
   const { phone } = req.body;
@@ -140,13 +169,24 @@ const recordLoginHistory = async (req, userId, authMethod, status) => {
 };
 
 export const Signup = async (req, res) => {
-  const { name, email, password } = req.body;
+  let { name, email, password, phone } = req.body;
   console.log("Signup attempt for:", email);
   try {
     const exisitinguser = await user.findOne({ email });
     if (exisitinguser) {
       console.log("User already exists:", email);
       return res.status(400).json({ message: "User already exist" });
+    }
+    // normalize phone to digits only if provided
+    if (phone) {
+      phone = String(phone).replace(/\D/g, "");
+      if (phone.length < 10) {
+        return res.status(400).json({ message: "Invalid phone number" });
+      }
+      const phoneExists = await user.findOne({ phone });
+      if (phoneExists) {
+        return res.status(400).json({ message: "Phone number already in use" });
+      }
     }
     console.log("Hashing password...");
     const hashpassword = await bcrypt.hash(password, 12);
@@ -159,6 +199,7 @@ export const Signup = async (req, res) => {
       name,
       email,
       password: hashpassword,
+      ...(phone ? { phone } : {}),
       followers: [],
       following: [],
       goldBadges: 0,
@@ -254,14 +295,6 @@ export const Login = async (req, res) => {
 
     await recordLoginHistory(req, exisitinguser._id, isMicrosoft ? "NONE" : "PASSWORD", "SUCCESS");
 
-    // RESET social stats on every login as per project requirements
-    exisitinguser.followers = [];
-    exisitinguser.following = [];
-    exisitinguser.goldBadges = 0;
-    exisitinguser.silverBadges = 0;
-    exisitinguser.bronzeBadges = 0;
-    await exisitinguser.save();
-
     res.status(200).json({ data: exisitinguser, token });
   } catch (error) {
     console.error("Login Error:", error);
@@ -293,14 +326,6 @@ export const verifyOTP = async (req, res) => {
 
     await Otp.deleteOne({ _id: otpRecord._id });
 
-    // RESET social stats on every login as per project requirements
-    exisitinguser.followers = [];
-    exisitinguser.following = [];
-    exisitinguser.goldBadges = 0;
-    exisitinguser.silverBadges = 0;
-    exisitinguser.bronzeBadges = 0;
-    await exisitinguser.save();
-
     res.status(200).json({ data: exisitinguser, token });
   } catch (error) {
     res.status(500).json({ message: "OTP verification failed" });
@@ -327,16 +352,29 @@ export const getallusers = async (req, res) => {
 };
 export const updateprofile = async (req, res) => {
   const { id: _id } = req.params;
-  const { name, about, tags } = req.body.editForm;
+  const { name, about, tags, phone } = req.body.editForm;
   if (!mongoose.Types.ObjectId.isValid(_id)) {
     return res.status(400).json({ message: "User unavailable" });
   }
   try {
-    const updateprofile = await user.findByIdAndUpdate(
-      _id,
-      { $set: { name: name, about: about, tags: tags } },
-      { new: true }
-    );
+    const update = { name, about, tags };
+    if (phone !== undefined) {
+      const normalized = String(phone).replace(/\D/g, "");
+      if (normalized && normalized.length < 10) {
+        return res.status(400).json({ message: "Invalid phone number" });
+      }
+      // ensure uniqueness excluding self
+      if (normalized) {
+        const other = await user.findOne({ phone: normalized, _id: { $ne: _id } });
+        if (other) {
+          return res.status(400).json({ message: "Phone number already in use" });
+        }
+        update.phone = normalized;
+      } else {
+        update.phone = undefined;
+      }
+    }
+    const updateprofile = await user.findByIdAndUpdate(_id, { $set: update }, { new: true });
     res.status(200).json({ data: updateprofile });
   } catch (error) {
     console.log(error);

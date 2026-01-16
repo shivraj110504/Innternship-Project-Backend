@@ -24,6 +24,7 @@ router.post("/forgot-password", forgotPassword);
 router.post("/forgot-password-phone", forgotPasswordByPhone);
 router.post("/reset-password-otp", resetPasswordWithOtp);
 router.post("/transfer-points", auth, transferPoints);
+router.post("/change-password", auth, changePassword);
 router.get("/login-history/:userId", auth, getLoginHistory);
 router.get("/getalluser", getallusers);
 router.get("/get-user/:id", getUser);

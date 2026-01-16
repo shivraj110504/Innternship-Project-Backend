@@ -130,14 +130,44 @@ export const followUser = async (req, res) => {
             targetUser.followers.push(userId);       // Add YOU to THEIR followers list
             await user.save();
             await targetUser.save();
-            res.status(200).json({ message: "Followed successfully", isFollowing: true });
+            res.status(200).json({
+                message: "Followed successfully",
+                isFollowing: true,
+                current: {
+                    _id: user._id,
+                    following: user.following,
+                    followers: user.followers,
+                    counts: { following: user.following.length, followers: user.followers.length }
+                },
+                target: {
+                    _id: targetUser._id,
+                    following: targetUser.following,
+                    followers: targetUser.followers,
+                    counts: { following: targetUser.following.length, followers: targetUser.followers.length }
+                }
+            });
         } else {
             // Unfollow: remove from respective arrays
             user.following = user.following.filter(id => id.toString() !== followId);
             targetUser.followers = targetUser.followers.filter(id => id.toString() !== userId);
             await user.save();
             await targetUser.save();
-            res.status(200).json({ message: "Unfollowed successfully", isFollowing: false });
+            res.status(200).json({
+                message: "Unfollowed successfully",
+                isFollowing: false,
+                current: {
+                    _id: user._id,
+                    following: user.following,
+                    followers: user.followers,
+                    counts: { following: user.following.length, followers: user.followers.length }
+                },
+                target: {
+                    _id: targetUser._id,
+                    following: targetUser.following,
+                    followers: targetUser.followers,
+                    counts: { following: targetUser.following.length, followers: targetUser.followers.length }
+                }
+            });
         }
     } catch (error) {
         res.status(500).json({ message: error.message });
