@@ -156,9 +156,9 @@ export const followUser = async (req, res) => {
                 targetUser.save()
             ]);
             
-            // Reload fresh data from database to ensure accuracy
-            const updatedUser = await User.findById(userId).select('following followers');
-            const updatedTargetUser = await User.findById(followId).select('following followers');
+            // Reload fresh data from database to ensure accuracy (get full user data)
+            const updatedUser = await User.findById(userId);
+            const updatedTargetUser = await User.findById(followId);
             
             if (!updatedUser || !updatedTargetUser) {
                 return res.status(500).json({ message: "Failed to verify user data" });
@@ -166,6 +166,10 @@ export const followUser = async (req, res) => {
 
             // Verify the operation succeeded
             const verifyFollowing = (updatedUser.following || []).some((id) => String(id) === followIdStr);
+            if (!verifyFollowing) {
+                console.error("Follow operation verification failed - user not in following list");
+                return res.status(500).json({ message: "Follow operation failed to save correctly" });
+            }
             
             res.status(200).json({
                 message: "Followed successfully",
@@ -204,9 +208,9 @@ export const followUser = async (req, res) => {
                 targetUser.save()
             ]);
             
-            // Reload fresh data from database to ensure accuracy
-            const updatedUser = await User.findById(userId).select('following followers');
-            const updatedTargetUser = await User.findById(followId).select('following followers');
+            // Reload fresh data from database to ensure accuracy (get full user data)
+            const updatedUser = await User.findById(userId);
+            const updatedTargetUser = await User.findById(followId);
             
             if (!updatedUser || !updatedTargetUser) {
                 return res.status(500).json({ message: "Failed to verify user data" });
@@ -214,6 +218,10 @@ export const followUser = async (req, res) => {
 
             // Verify the operation succeeded
             const verifyNotFollowing = !(updatedUser.following || []).some((id) => String(id) === followIdStr);
+            if (!verifyNotFollowing) {
+                console.error("Unfollow operation verification failed - user still in following list");
+                return res.status(500).json({ message: "Unfollow operation failed to save correctly" });
+            }
             
             res.status(200).json({
                 message: "Unfollowed successfully",
