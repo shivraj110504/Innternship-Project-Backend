@@ -1,40 +1,4 @@
 import jwt from "jsonwebtoken";
-
-// Optional auth middleware - allows requests without token
-const optionalAuth = (req, res, next) => {
-  try {
-    const authHeader = req.headers.authorization || req.headers.Authorization;
-    
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      req.userid = null;
-      return next();
-    }
-    
-    const token = authHeader.split(" ")[1];
-    if (token) {
-      try {
-        const decodedata = jwt.verify(token, process.env.JWT_SECRET);
-        if (decodedata && decodedata.id) {
-          req.userid = decodedata.id;
-        } else {
-          req.userid = null;
-        }
-      } catch (err) {
-        // Invalid token - just set to null and continue
-        req.userid = null;
-      }
-    } else {
-      req.userid = null;
-    }
-    
-    next();
-  } catch (error) {
-    req.userid = null;
-    next();
-  }
-};
-
-// Required auth middleware - requires valid token
 const auth = (req, res, next) => {
   try {
     // Check if authorization header exists (handle both cases)
@@ -42,6 +6,7 @@ const auth = (req, res, next) => {
     
     if (!authHeader) {
       console.log("Auth middleware: No authorization header found");
+      console.log("Available headers:", Object.keys(req.headers));
       return res.status(401).json({ message: "Unauthenticated - No token provided" });
     }
     
@@ -75,6 +40,4 @@ const auth = (req, res, next) => {
     return res.status(401).json({ message: "Unauthenticated - Authentication failed" });
   }
 };
-
-export default auth;
-export { optionalAuth };
+export default auth
