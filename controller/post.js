@@ -120,56 +120,107 @@ export const followUser = async (req, res) => {
         const user = await User.findById(userId);
         const targetUser = await User.findById(followId);
 
+        if (!user) return res.status(404).json({ message: "Current user not found" });
         if (!targetUser) return res.status(404).json({ message: "User not found" });
 
-        const isFollowing = (user.following || []).some((id) => id.toString() === String(followId));
+        // Ensure arrays exist
+        if (!user.following) user.following = [];
+        if (!user.followers) user.followers = [];
+        if (!targetUser.following) targetUser.following = [];
+        if (!targetUser.followers) targetUser.followers = [];
+
+        const followIdStr = String(followId);
+        const userIdStr = String(userId);
+
+        const isFollowing = user.following.some((id) => id.toString() === followIdStr);
 
         if (!isFollowing) {
-            // Asymmetric Follow: only update respective arrays
-            user.following.push(followId);           // Add to YOUR following list
-            targetUser.followers.push(userId);       // Add YOU to THEIR followers list
-            await user.save();
-            await targetUser.save();
+            // Follow: Add to respective arrays (check for duplicates first)
+            if (!user.following.some((id) => id.toString() === followIdStr)) {
+                user.following.push(followId);
+                user.markModified('following');
+            }
+            if (!targetUser.followers.some((id) => id.toString() === userIdStr)) {
+                targetUser.followers.push(userId);
+                targetUser.markModified('followers');
+            }
+            
+            // Save both users - ensure changes are persisted
+            const [savedUser, savedTargetUser] = await Promise.all([
+                user.save(),
+                targetUser.save()
+            ]);
+            
+            // Reload from database to ensure we have the latest data
+            const updatedUser = await User.findById(userId);
+            const updatedTargetUser = await User.findById(followId);
+            
             res.status(200).json({
                 message: "Followed successfully",
                 isFollowing: true,
                 current: {
-                    _id: user._id,
-                    following: user.following,
-                    followers: user.followers,
-                    counts: { following: user.following.length, followers: user.followers.length }
+                    _id: updatedUser._id,
+                    following: updatedUser.following || [],
+                    followers: updatedUser.followers || [],
+                    counts: { 
+                        following: (updatedUser.following || []).length, 
+                        followers: (updatedUser.followers || []).length 
+                    }
                 },
                 target: {
-                    _id: targetUser._id,
-                    following: targetUser.following,
-                    followers: targetUser.followers,
-                    counts: { following: targetUser.following.length, followers: targetUser.followers.length }
+                    _id: updatedTargetUser._id,
+                    following: updatedTargetUser.following || [],
+                    followers: updatedTargetUser.followers || [],
+                    counts: { 
+                        following: (updatedTargetUser.following || []).length, 
+                        followers: (updatedTargetUser.followers || []).length 
+                    }
                 }
             });
         } else {
             // Unfollow: remove from respective arrays
-            user.following = user.following.filter(id => id.toString() !== followId);
-            targetUser.followers = targetUser.followers.filter(id => id.toString() !== userId);
-            await user.save();
-            await targetUser.save();
+            user.following = user.following.filter(id => id.toString() !== followIdStr);
+            targetUser.followers = targetUser.followers.filter(id => id.toString() !== userIdStr);
+            
+            // Mark arrays as modified
+            user.markModified('following');
+            targetUser.markModified('followers');
+            
+            // Save both users - ensure changes are persisted
+            const [savedUser, savedTargetUser] = await Promise.all([
+                user.save(),
+                targetUser.save()
+            ]);
+            
+            // Reload from database to ensure we have the latest data
+            const updatedUser = await User.findById(userId);
+            const updatedTargetUser = await User.findById(followId);
+            
             res.status(200).json({
                 message: "Unfollowed successfully",
                 isFollowing: false,
                 current: {
-                    _id: user._id,
-                    following: user.following,
-                    followers: user.followers,
-                    counts: { following: user.following.length, followers: user.followers.length }
+                    _id: updatedUser._id,
+                    following: updatedUser.following || [],
+                    followers: updatedUser.followers || [],
+                    counts: { 
+                        following: (updatedUser.following || []).length, 
+                        followers: (updatedUser.followers || []).length 
+                    }
                 },
                 target: {
-                    _id: targetUser._id,
-                    following: targetUser.following,
-                    followers: targetUser.followers,
-                    counts: { following: targetUser.following.length, followers: targetUser.followers.length }
+                    _id: updatedTargetUser._id,
+                    following: updatedTargetUser.following || [],
+                    followers: updatedTargetUser.followers || [],
+                    counts: { 
+                        following: (updatedTargetUser.following || []).length, 
+                        followers: (updatedTargetUser.followers || []).length 
+                    }
                 }
             });
         }
     } catch (error) {
+        console.error("Follow user error:", error);
         res.status(500).json({ message: error.message });
     }
 };

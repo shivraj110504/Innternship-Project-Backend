@@ -13,14 +13,15 @@ export const Askquestion = async (req, res) => {
     const userData = await User.findById(userId);
     if (!userData) return res.status(404).json({ message: "User not found" });
 
-    const followerCount = userData.followers ? userData.followers.length : 0;
+    // Define 'friends' as number of people the user follows (not followers)
+    const friendsCount = Array.isArray(userData.following) ? userData.following.length : 0;
 
-    // Rule: if no followers (friends), cannot post
-    if (followerCount === 0) {
-      return res.status(403).json({ message: "You are not allowed to post. You need at least 1 follower to ask questions." });
+    // Rule: if no friends, cannot post
+    if (friendsCount === 0) {
+      return res.status(403).json({ message: "You are not allowed to post. You need at least 1 friend to ask questions." });
     }
 
-    // Rule: Posting limit logic
+    // Rule: Posting limit logic based on friends count
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -29,21 +30,22 @@ export const Askquestion = async (req, res) => {
       askedon: { $gte: today },
     });
 
-    if (followerCount >= 1 && followerCount <= 10) {
-      if (questionsToday >= followerCount) {
+    // 1 friend = 1 post/day, 2 friends = 2 posts/day, >10 friends = unlimited
+    if (friendsCount >= 1 && friendsCount <= 10) {
+      if (questionsToday >= friendsCount) {
         return res.status(429).json({
-          message: `You can post only ${followerCount} question${followerCount > 1 ? "s" : ""} a day based on your follower count.`,
+          message: `You can post only ${friendsCount} question${friendsCount > 1 ? "s" : ""} a day based on your friends count.`,
         });
       }
     }
-    // If followerCount > 10, no limit (multiple times)
+    // If friendsCount > 10, no limit (multiple times)
 
     const postques = new question({ ...postquestiondata, userid: userId });
     await postques.save();
     res.status(200).json({ data: postques });
   } catch (error) {
-    console.log(error);
-    res.status(500).json("something went wrong..");
+    console.error("Ask question error:", error);
+    res.status(500).json({ message: error.message || "Something went wrong" });
     return;
   }
 };
