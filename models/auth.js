@@ -8,6 +8,8 @@ const userSchema = new mongoose.Schema({
   phone: { type: String, unique: true, sparse: true },
   phoneVerified: { type: Boolean, default: false },
 
+  points: { type: Number, default: 0 },
+
   forgotPasswordAt: { type: Date },
   followers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
   following: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],

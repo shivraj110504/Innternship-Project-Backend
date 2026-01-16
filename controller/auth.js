@@ -49,6 +49,69 @@ const sendOtpEmail = async (email, otp) => {
   }
 };
 
+// Send reset OTP by phone directly
+export const forgotPasswordByPhone = async (req, res) => {
+  const { phone } = req.body;
+  if (!phone) return res.status(400).json({ message: "Phone number is required" });
+  try {
+    const existingUser = await user.findOne({ phone });
+    if (!existingUser) {
+      return res.status(404).json({ message: "User with this phone not found" });
+    }
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    await Otp.create({
+      userId: existingUser._id,
+      otp: otpCode,
+      email: existingUser.email,
+      phone: existingUser.phone,
+    });
+
+    try {
+      await sendFast2Sms({
+        message: `Your OTP for password reset is ${otpCode}.`,
+        numbers: existingUser.phone,
+      });
+    } catch (smsError) {
+      console.error("Fast2SMS Error:", smsError);
+      return res.status(500).json({ message: "Failed to send SMS OTP. Please try again later." });
+    }
+
+    res.status(200).json({ message: "OTP sent to your mobile number." });
+  } catch (error) {
+    console.error("Forgot Password (phone) Error:", error);
+    res.status(500).json({ message: "Something went wrong" });
+  }
+};
+
+// Transfer points between users
+export const transferPoints = async (req, res) => {
+  const { fromUserId, toUserId, amount } = req.body;
+  const amt = Number(amount);
+  if (!fromUserId || !toUserId || !amt || amt <= 0) {
+    return res.status(400).json({ message: "Invalid transfer request" });
+  }
+  if (fromUserId === toUserId) {
+    return res.status(400).json({ message: "Cannot transfer to self" });
+  }
+  try {
+    const from = await user.findById(fromUserId);
+    const to = await user.findById(toUserId);
+    if (!from || !to) return res.status(404).json({ message: "User not found" });
+    if ((from.points || 0) < 10) return res.status(403).json({ message: "Need at least 10 points to transfer" });
+    if (from.points < amt) return res.status(400).json({ message: "Insufficient points" });
+
+    from.points -= amt;
+    to.points = (to.points || 0) + amt;
+    await from.save();
+    await to.save();
+    res.status(200).json({ message: "Transfer successful", fromPoints: from.points, toPoints: to.points });
+  } catch (error) {
+    console.error("Transfer Points Error:", error);
+    res.status(500).json({ message: "Failed to transfer points" });
+  }
+};
+
 // Helper to record login history
 const recordLoginHistory = async (req, userId, authMethod, status) => {
   const userAgent = req.headers["user-agent"] || "";

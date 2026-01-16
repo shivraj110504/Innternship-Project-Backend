@@ -17,6 +17,8 @@ const questionschema = mongoose.Schema(
         useranswered: String,
         userid: String,
         answeredon: { type: Date, default: Date.now },
+        upvote: { type: [String], default: [] },
+        downvote: { type: [String], default: [] },
       },
     ],
   },
