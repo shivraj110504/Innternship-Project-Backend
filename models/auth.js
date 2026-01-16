@@ -11,6 +11,17 @@ const userSchema = new mongoose.Schema({
   points: { type: Number, default: 0 },
 
   forgotPasswordAt: { type: Date },
+  
+  // Friends system: confirmed friends (mutual)
+  friends: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+  
+  // Friend requests: sent requests (pending)
+  sentFriendRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+  
+  // Friend requests: received requests (pending confirmation)
+  receivedFriendRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+
+  // Keep old fields for backward compatibility (deprecated)
   followers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
   following: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
 

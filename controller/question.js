@@ -13,12 +13,12 @@ export const Askquestion = async (req, res) => {
     const userData = await User.findById(userId);
     if (!userData) return res.status(404).json({ message: "User not found" });
 
-    // Define 'friends' as number of people the user follows (not followers)
-    const friendsCount = Array.isArray(userData.following) ? userData.following.length : 0;
+    // Define 'friends' as confirmed friends (mutual friends)
+    const friendsCount = Array.isArray(userData.friends) ? userData.friends.length : 0;
 
     // Rule: if no friends, cannot post
     if (friendsCount === 0) {
-      return res.status(403).json({ message: "You are not allowed to post. You need at least 1 friend to ask questions." });
+      return res.status(403).json({ message: "You are not allowed to post. You need at least 1 confirmed friend to ask questions." });
     }
 
     // Rule: Posting limit logic based on friends count
