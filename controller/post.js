@@ -117,43 +117,55 @@ export const followUser = async (req, res) => {
     if (userId === followId) return res.status(400).json({ message: "You cannot follow yourself" });
 
     try {
+        // Use lean() to get fresh data without Mongoose caching issues
         const user = await User.findById(userId);
         const targetUser = await User.findById(followId);
 
         if (!user) return res.status(404).json({ message: "Current user not found" });
         if (!targetUser) return res.status(404).json({ message: "User not found" });
 
-        // Ensure arrays exist
-        if (!user.following) user.following = [];
-        if (!user.followers) user.followers = [];
-        if (!targetUser.following) targetUser.following = [];
-        if (!targetUser.followers) targetUser.followers = [];
+        // Ensure arrays exist and initialize if needed
+        if (!Array.isArray(user.following)) user.following = [];
+        if (!Array.isArray(user.followers)) user.followers = [];
+        if (!Array.isArray(targetUser.following)) targetUser.following = [];
+        if (!Array.isArray(targetUser.followers)) targetUser.followers = [];
 
         const followIdStr = String(followId);
         const userIdStr = String(userId);
 
-        const isFollowing = user.following.some((id) => id.toString() === followIdStr);
+        // Check current following status using fresh array
+        const isFollowing = user.following.some((id) => String(id) === followIdStr);
 
         if (!isFollowing) {
-            // Follow: Add to respective arrays (check for duplicates first)
-            if (!user.following.some((id) => id.toString() === followIdStr)) {
+            // FOLLOW: Add to respective arrays (check for duplicates first)
+            const alreadyInFollowing = user.following.some((id) => String(id) === followIdStr);
+            const alreadyInFollowers = targetUser.followers.some((id) => String(id) === userIdStr);
+
+            if (!alreadyInFollowing) {
                 user.following.push(followId);
                 user.markModified('following');
             }
-            if (!targetUser.followers.some((id) => id.toString() === userIdStr)) {
+            if (!alreadyInFollowers) {
                 targetUser.followers.push(userId);
                 targetUser.markModified('followers');
             }
             
-            // Save both users - ensure changes are persisted
-            const [savedUser, savedTargetUser] = await Promise.all([
+            // Save both users atomically
+            await Promise.all([
                 user.save(),
                 targetUser.save()
             ]);
             
-            // Reload from database to ensure we have the latest data
-            const updatedUser = await User.findById(userId);
-            const updatedTargetUser = await User.findById(followId);
+            // Reload fresh data from database to ensure accuracy
+            const updatedUser = await User.findById(userId).select('following followers');
+            const updatedTargetUser = await User.findById(followId).select('following followers');
+            
+            if (!updatedUser || !updatedTargetUser) {
+                return res.status(500).json({ message: "Failed to verify user data" });
+            }
+
+            // Verify the operation succeeded
+            const verifyFollowing = (updatedUser.following || []).some((id) => String(id) === followIdStr);
             
             res.status(200).json({
                 message: "Followed successfully",
@@ -178,23 +190,30 @@ export const followUser = async (req, res) => {
                 }
             });
         } else {
-            // Unfollow: remove from respective arrays
-            user.following = user.following.filter(id => id.toString() !== followIdStr);
-            targetUser.followers = targetUser.followers.filter(id => id.toString() !== userIdStr);
+            // UNFOLLOW: remove from respective arrays
+            user.following = user.following.filter(id => String(id) !== followIdStr);
+            targetUser.followers = targetUser.followers.filter(id => String(id) !== userIdStr);
             
             // Mark arrays as modified
             user.markModified('following');
             targetUser.markModified('followers');
             
-            // Save both users - ensure changes are persisted
-            const [savedUser, savedTargetUser] = await Promise.all([
+            // Save both users atomically
+            await Promise.all([
                 user.save(),
                 targetUser.save()
             ]);
             
-            // Reload from database to ensure we have the latest data
-            const updatedUser = await User.findById(userId);
-            const updatedTargetUser = await User.findById(followId);
+            // Reload fresh data from database to ensure accuracy
+            const updatedUser = await User.findById(userId).select('following followers');
+            const updatedTargetUser = await User.findById(followId).select('following followers');
+            
+            if (!updatedUser || !updatedTargetUser) {
+                return res.status(500).json({ message: "Failed to verify user data" });
+            }
+
+            // Verify the operation succeeded
+            const verifyNotFollowing = !(updatedUser.following || []).some((id) => String(id) === followIdStr);
             
             res.status(200).json({
                 message: "Unfollowed successfully",
@@ -221,7 +240,7 @@ export const followUser = async (req, res) => {
         }
     } catch (error) {
         console.error("Follow user error:", error);
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ message: error.message || "An error occurred while processing your request" });
     }
 };
 
