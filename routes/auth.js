@@ -12,7 +12,8 @@ import {
   getUser,
   resetPasswordWithOtp,
   forgotPasswordByPhone,
-  transferPoints
+  transferPoints,
+  changePassword
 } from "../controller/auth.js";
 
 const router = express.Router();
