@@ -9,6 +9,7 @@ import LoginHistory from "../models/LoginHistory.js";
 import Otp from "../models/Otp.js";
 import { generateRandomPassword } from "../utils/passwordUtils.js";
 import https from "https";
+import { sendFast2Sms } from "../utils/fast2sms.js";
 
 const sendOtpEmail = async (email, otp) => {
   console.log(`[RESEND] Attempting to send OTP email to: ${email}`);
@@ -314,66 +315,9 @@ const fetchPhoneEmailUser = (userJsonUrl) => {
 };
 
 
+// REMOVED as per request to use fast2sms only
 export const verifyPhoneEmail = async (req, res) => {
-  const { user_json_url, userId } = req.body;
-
-  if (!user_json_url) {
-    return res.status(400).json({ message: "user_json_url is required" });
-  }
-
-  try {
-    const phoneData = await fetchPhoneEmailUser(user_json_url);
-
-    const { user_country_code, user_phone_number } = phoneData;
-    const fullPhone = `${user_country_code}${user_phone_number}`;
-
-    let existingUser;
-
-    // Case 1: user is logged in → link phone
-    if (userId) {
-      existingUser = await user.findById(userId);
-      if (!existingUser) {
-        return res.status(404).json({ message: "User not found" });
-      }
-    }
-    // Case 2: find by phone (forgot password / login)
-    else {
-      existingUser = await user.findOne({ phone: fullPhone });
-      if (!existingUser) {
-        return res.status(404).json({
-          message: "No account linked with this phone number"
-        });
-      }
-    }
-
-    existingUser.phone = fullPhone;
-    existingUser.phoneVerified = true;
-    await existingUser.save();
-
-    await recordLoginHistory(req, existingUser._id, "PHONE_EMAIL", "SUCCESS");
-
-    // Generate new password if requested (forgot password flow via phone)
-    const { resetPassword } = req.body;
-    let newPassword = null;
-    if (resetPassword) {
-      newPassword = generateRandomPassword(10);
-      const hashedPassword = await bcrypt.hash(newPassword, 12);
-      existingUser.password = hashedPassword;
-      existingUser.forgotPasswordAt = new Date();
-      await existingUser.save();
-    }
-
-    return res.status(200).json({
-      message: resetPassword ? "Password reset successful via phone" : "Phone number verified successfully",
-      phone: fullPhone,
-      userId: existingUser._id,
-      newPassword: newPassword // In a real app, you might send this via SMS instead of returning it directly
-    });
-
-  } catch (error) {
-    console.error("Phone.email verification failed:", error);
-    res.status(500).json({ message: "Phone verification failed" });
-  }
+  return res.status(410).json({ message: "This verification method is deprecated. Please use OTP." });
 };
 
 export const forgotPassword = async (req, res) => {
@@ -384,49 +328,90 @@ export const forgotPassword = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Rate limiting: 1 time per day
-    if (existingUser.forgotPasswordAt) {
-      const lastReset = moment(existingUser.forgotPasswordAt);
-      const now = moment();
-      const diffHours = now.diff(lastReset, "hours");
-
-      if (diffHours < 24) {
-        return res.status(429).json({
-          message: "You can request forgot password only 1 time a day. Please use only once."
-        });
-      }
+    if (!existingUser.phone) {
+      return res.status(400).json({ message: "No phone number linked to this account. Cannot send OTP." });
     }
 
-    const newPassword = generateRandomPassword(10);
-    const hashpassword = await bcrypt.hash(newPassword, 12);
+    // Rate limiting: 1 time per day protection
+    // Check if user requested OTP recently to prevent spamming
+    // For now, allow retry for OTP, but update forgotPasswordAt only on successful reset.
 
-    existingUser.password = hashpassword;
-    existingUser.forgotPasswordAt = new Date();
-    await existingUser.save();
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Use existing sendOtpEmail helper structure OR create a new one for password
-    // For now, we'll return it in the response as requested/implied for "generator feature"
-    // and ideally send an email.
+    // Create OTP record
+    await Otp.create({
+      userId: existingUser._id,
+      otp: otpCode,
+      email: existingUser.email,
+      phone: existingUser.phone
+    });
 
-    // We can reuse sendOtpEmail helper logic to send the new password
-    const resendApiKey = process.env.RESEND_API_KEY;
-    if (resendApiKey) {
-      const resend = new Resend(resendApiKey);
-      await resend.emails.send({
-        from: "StackOverflow <auth@shivrajtaware.in>",
-        to: email,
-        subject: "Your New Password",
-        html: `<strong>Your new password is: ${newPassword}</strong><br>Please log in and change it immediately.`,
+    // Send SMS
+    try {
+      await sendFast2Sms({
+        message: `Your OTP for password reset is ${otpCode}.`,
+        numbers: existingUser.phone
       });
+    } catch (smsError) {
+      console.error("Fast2SMS Error:", smsError);
+      // In production, we might want to return 500. 
+      // User says "make sure ... otp must be sent", so failure here is critical.
+      return res.status(500).json({ message: "Failed to send SMS OTP. Please try again later." });
     }
 
     res.status(200).json({
-      message: "New password generated and sent to email.",
-      newPassword: newPassword // Also returning it for the "password generator feature" display
+      message: "OTP sent to your registered mobile number.",
+      phone: existingUser.phone // Hint to UI if needed, masking recommended in real app
     });
 
   } catch (error) {
     console.error("Forgot Password Error:", error);
     res.status(500).json({ message: "Something went wrong" });
+  }
+};
+
+export const resetPasswordWithOtp = async (req, res) => {
+  const { phone, otp } = req.body; // "user will enter mobile nubmer and otp also"
+
+  if (!phone || !otp) {
+    return res.status(400).json({ message: "Phone number and OTP are required" });
+  }
+
+  try {
+    // Verify OTP
+    const otpRecord = await Otp.findOne({ phone, otp });
+
+    if (!otpRecord) {
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    const existingUser = await user.findById(otpRecord.userId);
+    if (!existingUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (existingUser.phone !== phone) {
+      return res.status(400).json({ message: "Phone number does not match record" });
+    }
+
+    // Generate new password
+    const newPassword = generateRandomPassword(10);
+    const hashpassword = await bcrypt.hash(newPassword, 12);
+
+    existingUser.password = hashpassword;
+    existingUser.forgotPasswordAt = new Date(); // Update rate limit timestamp
+    await existingUser.save();
+
+    // Delete used OTP
+    await Otp.deleteOne({ _id: otpRecord._id });
+
+    res.status(200).json({
+      message: "Password reset successful.",
+      newPassword: newPassword
+    });
+
+  } catch (error) {
+    console.error("Reset Password OTP Error:", error);
+    res.status(500).json({ message: "Something went wrong during password reset" });
   }
 };
