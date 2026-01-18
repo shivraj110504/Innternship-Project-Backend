@@ -5,16 +5,30 @@ import { awardBadges } from "./auth.js";
 
 export const Askanswer = async (req, res) => {
   const { id: _id } = req.params;
+  const userId = req.userid; // Use from auth middleware
+
   if (!mongoose.Types.ObjectId.isValid(_id)) {
     return res.status(400).json({ message: "question unavailable" });
   }
-  const { noofanswer, answerbody, useranswered, userid } = req.body;
+
+  if (!userId) return res.status(403).json({ message: "Unauthenticated" });
+
+  const { noofanswer, answerbody, useranswered } = req.body;
 
   try {
+    const userData = await user.findById(userId);
+    if (!userData) return res.status(404).json({ message: "User not found" });
+
+    // Rule: Need at least 1 friend to post answers
+    const friendsCount = Array.isArray(userData.friends) ? userData.friends.length : 0;
+    if (friendsCount === 0) {
+      return res.status(403).json({ message: "You are not allowed to post answers. You need at least 1 friend to participate." });
+    }
+
     await updatenoofanswer(_id, noofanswer);
 
     const updatequestion = await question.findByIdAndUpdate(_id, {
-      $addToSet: { answer: [{ answerbody, useranswered, userid }] },
+      $addToSet: { answer: [{ answerbody, useranswered, userid: userId }] },
     });
 
     if (!updatequestion) {
@@ -24,10 +38,10 @@ export const Askanswer = async (req, res) => {
 
     // Reward +5 points to the answer author
     try {
-      await user.findByIdAndUpdate(userid, { $inc: { points: 5 } });
-      await awardBadges(userid);
+      await user.findByIdAndUpdate(userId, { $inc: { points: 5 } });
+      await awardBadges(userId);
     } catch (e) {
-      console.error(`[ANSWER] Failed to add points for user ${userid}:`, e?.message || e);
+      console.error(`[ANSWER] Failed to add points for user ${userId}:`, e?.message || e);
     }
     res.status(200).json({ data: updatequestion });
   } catch (error) {

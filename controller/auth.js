@@ -79,7 +79,7 @@ const sendOtpEmail = async (email, otp) => {
 // Change password for authenticated user
 export const changePassword = async (req, res) => {
   try {
-    const userId = req.userId; // set by auth middleware
+    const userId = req.userid; // set by auth middleware to req.userid
     const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ message: "Current and new password are required" });
@@ -385,7 +385,10 @@ export const getallusers = async (req, res) => {
 };
 export const updateprofile = async (req, res) => {
   const { id: _id } = req.params;
-  const { name, about, tags, phone } = req.body.editForm;
+  const { name, about, tags, phone } = req.body.editForm || {};
+  if (!req.body.editForm) {
+    return res.status(400).json({ message: "Form data is missing" });
+  }
   if (!mongoose.Types.ObjectId.isValid(_id)) {
     return res.status(400).json({ message: "User unavailable" });
   }
@@ -462,9 +465,8 @@ export const forgotPassword = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    if (!existingUser.phone) {
-      return res.status(400).json({ message: "No phone number linked to this account. Cannot send OTP." });
-    }
+    // If no phone is linked, we will only use Email-based OTP
+    const hasPhone = !!existingUser.phone;
 
     // Rate limiting: 1 time per day protection
     // Check if user requested OTP recently to prevent spamming
@@ -477,16 +479,17 @@ export const forgotPassword = async (req, res) => {
       userId: existingUser._id,
       otp: otpCode,
       email: existingUser.email,
-      phone: existingUser.phone
+      ...(hasPhone ? { phone: existingUser.phone } : {})
     });
 
     // Send SMS and Email
     try {
-      // 1. Send SMS
-      await sendFast2Sms({
-        message: `Your OTP for password reset is ${otpCode}.`,
-        numbers: existingUser.phone
-      });
+      if (hasPhone) {
+        await sendFast2Sms({
+          message: `Your OTP for password reset is ${otpCode}.`,
+          numbers: existingUser.phone
+        });
+      }
       // 2. Send Email
       await sendOtpEmail(existingUser.email, otpCode);
 
@@ -515,8 +518,10 @@ export const resetPasswordWithOtp = async (req, res) => {
   }
 
   try {
-    // Verify OTP
-    const otpRecord = await Otp.findOne({ phone, otp });
+    // Verify OTP by phone OR email
+    const otpRecord = phone
+      ? await Otp.findOne({ phone, otp })
+      : await Otp.findOne({ email: req.body.email, otp });
 
     if (!otpRecord) {
       return res.status(400).json({ message: "Invalid or expired OTP" });

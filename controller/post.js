@@ -221,28 +221,35 @@ export const rejectFriendRequest = async (req, res) => {
 export const getFriends = async (req, res) => {
     const userId = req.userid;
     try {
+        if (!userId) return res.status(403).json({ message: "Unauthenticated" });
         const userData = await User.findById(userId).populate("friends", "name email joinDate");
         if (!userData) return res.status(404).json({ message: "User not found" });
-        // Filter out any friends that failed to populate (e.g. deleted users)
-        const activeFriends = (userData.friends || []).filter(f => f && f._id);
+
+        // Ensure friends is an array before filtering
+        const friendsList = Array.isArray(userData.friends) ? userData.friends : [];
+        const activeFriends = friendsList.filter(f => f && f._id);
+
         res.status(200).json(activeFriends);
     } catch (error) {
         console.error("getFriends Error:", error);
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ message: error.message || "Failed to fetch friends" });
     }
 };
 
 export const getFriendRequests = async (req, res) => {
     const userId = req.userid;
     try {
+        if (!userId) return res.status(403).json({ message: "Unauthenticated" });
         const userData = await User.findById(userId).populate("receivedFriendRequests", "name email joinDate");
         if (!userData) return res.status(404).json({ message: "User not found" });
-        // Filter out nulls
-        const activeRequests = (userData.receivedFriendRequests || []).filter(r => r && r._id);
+
+        const requestsList = Array.isArray(userData.receivedFriendRequests) ? userData.receivedFriendRequests : [];
+        const activeRequests = requestsList.filter(r => r && r._id);
+
         res.status(200).json(activeRequests);
     } catch (error) {
         console.error("getFriendRequests Error:", error);
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ message: error.message || "Failed to fetch friend requests" });
     }
 };
 
