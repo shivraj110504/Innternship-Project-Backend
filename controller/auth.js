@@ -255,7 +255,8 @@ export const Signup = async (req, res) => {
     await recordLoginHistory(req, newuser._id, "PASSWORD", "SUCCESS");
 
     console.log("Signup successful for:", email);
-    res.status(200).json({ data: newuser, token });
+    res.setHeader('Set-Cookie', `token=${token}; HttpOnly; Path=/; Max-Age=31536000; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+    res.status(200).json({ data: newuser });
   } catch (error) {
     console.error("Signup Error Detail:", error);
     res.status(500).json({ message: error.message || "Something went wrong during signup" });
@@ -328,7 +329,8 @@ export const Login = async (req, res) => {
 
     await recordLoginHistory(req, exisitinguser._id, isMicrosoft ? "NONE" : "PASSWORD", "SUCCESS");
 
-    res.status(200).json({ data: exisitinguser, token });
+    res.setHeader('Set-Cookie', `token=${token}; HttpOnly; Path=/; Max-Age=31536000; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+    res.status(200).json({ data: exisitinguser });
   } catch (error) {
     console.error("Login Error:", error);
     res.status(500).json({ message: error.message || "Something went wrong during login" });
@@ -359,10 +361,16 @@ export const verifyOTP = async (req, res) => {
 
     await Otp.deleteOne({ _id: otpRecord._id });
 
-    res.status(200).json({ data: exisitinguser, token });
+    res.setHeader('Set-Cookie', `token=${token}; HttpOnly; Path=/; Max-Age=31536000; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+    res.status(200).json({ data: exisitinguser });
   } catch (error) {
     res.status(500).json({ message: "OTP verification failed" });
   }
+};
+
+export const Logout = async (req, res) => {
+  res.setHeader('Set-Cookie', 'token=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax');
+  res.status(200).json({ message: "Logged out successfully" });
 };
 
 export const getLoginHistory = async (req, res) => {

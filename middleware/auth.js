@@ -1,16 +1,27 @@
 import jwt from "jsonwebtoken";
 const auth = (req, res, next) => {
   try {
-    // Check if authorization header exists
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ message: "Unauthenticated - No token provided" });
+    // Check for token in Cookie header first
+    let token = null;
+    if (req.headers.cookie) {
+      const cookies = req.headers.cookie.split(';').reduce((acc, cookie) => {
+        const [key, value] = cookie.trim().split('=');
+        acc[key] = value;
+        return acc;
+      }, {});
+      token = cookies['token'];
     }
 
-    // Extract token from "Bearer <token>"
-    const token = authHeader.split(" ")[1];
+    // Fallback to Authorization header if no cookie token
     if (!token) {
-      return res.status(401).json({ message: "Unauthenticated - Invalid token format" });
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        token = authHeader.split(" ")[1];
+      }
+    }
+
+    if (!token) {
+      return res.status(401).json({ message: "Unauthenticated - No token provided" });
     }
 
     // Verify token

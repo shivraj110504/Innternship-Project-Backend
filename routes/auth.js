@@ -13,7 +13,8 @@ import {
   resetPasswordWithOtp,
   forgotPasswordByPhone,
   transferPoints,
-  changePassword
+  changePassword,
+  Logout
 } from "../controller/auth.js";
 
 const router = express.Router();
@@ -29,5 +30,6 @@ router.post("/change-password", auth, changePassword);
 router.get("/login-history/:userId", auth, getLoginHistory);
 router.get("/getalluser", getallusers);
 router.get("/get-user/:id", getUser);
+router.post("/logout", Logout);
 router.patch("/update/:id", auth, updateprofile);
 export default router;
