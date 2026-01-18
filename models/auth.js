@@ -11,12 +11,13 @@ const userSchema = new mongoose.Schema({
   points: { type: Number, default: 0 },
 
   forgotPasswordAt: { type: Date },
-  followers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-  following: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-
   goldBadges: { type: Number, default: 0 },
   silverBadges: { type: Number, default: 0 },
   bronzeBadges: { type: Number, default: 0 },
+
+  friends: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+  sentFriendRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+  receivedFriendRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
 
   about: String,
   tags: [String],

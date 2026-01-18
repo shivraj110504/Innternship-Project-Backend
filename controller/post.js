@@ -1,5 +1,6 @@
 import Post from "../models/Post.js";
 import User from "../models/auth.js";
+import Notification from "../models/Notification.js";
 import mongoose from "mongoose";
 
 export const createPost = async (req, res) => {
@@ -12,8 +13,7 @@ export const createPost = async (req, res) => {
         const user = await User.findById(userId);
         if (!user) return res.status(404).json({ message: "User not found" });
 
-        // Define 'friends' as number of people the user follows
-        const friendsCount = Array.isArray(user.following) ? user.following.length : 0;
+        const friendsCount = Array.isArray(user.friends) ? user.friends.length : 0;
 
         // Rule: if no friends, cannot post
         if (friendsCount === 0) {
@@ -29,14 +29,17 @@ export const createPost = async (req, res) => {
             createdAt: { $gte: today },
         });
 
-        if (friendsCount >= 1 && friendsCount <= 10) {
-            if (postsToday >= friendsCount) {
-                return res.status(429).json({
-                    message: `You can post only ${friendsCount} time${friendsCount > 1 ? "s" : ""} a day based on your friends count.`,
-                });
-            }
+        // 1 friend = 1 post, 2-10 friends = 2 posts
+        let limit = 0;
+        if (friendsCount === 1) limit = 1;
+        else if (friendsCount >= 2 && friendsCount <= 10) limit = 2;
+        else if (friendsCount > 10) limit = Infinity;
+
+        if (postsToday >= limit) {
+            return res.status(429).json({
+                message: `You can post only ${limit} time${limit > 1 ? "s" : ""} a day based on your friends count.`,
+            });
         }
-        // If friendsCount > 10, no limit (multiple times)
 
         const newPost = await Post.create({
             userId,
@@ -109,138 +112,127 @@ export const commentPost = async (req, res) => {
     }
 };
 
-export const followUser = async (req, res) => {
-    const { followId } = req.body;
+export const sendFriendRequest = async (req, res) => {
+    const { friendId } = req.body;
     const userId = req.userid;
 
     if (!userId) return res.status(403).json({ message: "Unauthenticated" });
-    if (userId === followId) return res.status(400).json({ message: "You cannot follow yourself" });
+    if (userId === friendId) return res.status(400).json({ message: "You cannot add yourself as friend" });
 
     try {
-        // Use lean() to get fresh data without Mongoose caching issues
         const user = await User.findById(userId);
-        const targetUser = await User.findById(followId);
+        const targetUser = await User.findById(friendId);
 
-        if (!user) return res.status(404).json({ message: "Current user not found" });
-        if (!targetUser) return res.status(404).json({ message: "User not found" });
+        if (!user || !targetUser) return res.status(404).json({ message: "User not found" });
 
-        // Ensure arrays exist and initialize if needed
-        if (!Array.isArray(user.following)) user.following = [];
-        if (!Array.isArray(user.followers)) user.followers = [];
-        if (!Array.isArray(targetUser.following)) targetUser.following = [];
-        if (!Array.isArray(targetUser.followers)) targetUser.followers = [];
+        if (user.friends.includes(friendId)) return res.status(400).json({ message: "Already friends" });
+        if (user.sentFriendRequests.includes(friendId)) return res.status(400).json({ message: "Request already sent" });
 
-        const followIdStr = String(followId);
-        const userIdStr = String(userId);
+        user.sentFriendRequests.push(friendId);
+        targetUser.receivedFriendRequests.push(userId);
 
-        // Check current following status using fresh array
-        const isFollowing = user.following.some((id) => String(id) === followIdStr);
+        await Notification.create({
+            recipient: friendId,
+            sender: userId,
+            type: "FRIEND_REQUEST"
+        });
 
-        if (!isFollowing) {
-            // FOLLOW: Add to respective arrays (check for duplicates first)
-            const alreadyInFollowing = user.following.some((id) => String(id) === followIdStr);
-            const alreadyInFollowers = targetUser.followers.some((id) => String(id) === userIdStr);
+        await Promise.all([user.save(), targetUser.save()]);
 
-            if (!alreadyInFollowing) {
-                user.following.push(followId);
-                user.markModified('following');
-            }
-            if (!alreadyInFollowers) {
-                targetUser.followers.push(userId);
-                targetUser.markModified('followers');
-            }
-            
-            // Save both users atomically
-            await Promise.all([
-                user.save(),
-                targetUser.save()
-            ]);
-            
-            // Reload fresh data from database to ensure accuracy
-            const updatedUser = await User.findById(userId).select('following followers');
-            const updatedTargetUser = await User.findById(followId).select('following followers');
-            
-            if (!updatedUser || !updatedTargetUser) {
-                return res.status(500).json({ message: "Failed to verify user data" });
-            }
-
-            // Verify the operation succeeded
-            const verifyFollowing = (updatedUser.following || []).some((id) => String(id) === followIdStr);
-            
-            res.status(200).json({
-                message: "Followed successfully",
-                isFollowing: true,
-                current: {
-                    _id: updatedUser._id,
-                    following: updatedUser.following || [],
-                    followers: updatedUser.followers || [],
-                    counts: { 
-                        following: (updatedUser.following || []).length, 
-                        followers: (updatedUser.followers || []).length 
-                    }
-                },
-                target: {
-                    _id: updatedTargetUser._id,
-                    following: updatedTargetUser.following || [],
-                    followers: updatedTargetUser.followers || [],
-                    counts: { 
-                        following: (updatedTargetUser.following || []).length, 
-                        followers: (updatedTargetUser.followers || []).length 
-                    }
-                }
-            });
-        } else {
-            // UNFOLLOW: remove from respective arrays
-            user.following = user.following.filter(id => String(id) !== followIdStr);
-            targetUser.followers = targetUser.followers.filter(id => String(id) !== userIdStr);
-            
-            // Mark arrays as modified
-            user.markModified('following');
-            targetUser.markModified('followers');
-            
-            // Save both users atomically
-            await Promise.all([
-                user.save(),
-                targetUser.save()
-            ]);
-            
-            // Reload fresh data from database to ensure accuracy
-            const updatedUser = await User.findById(userId).select('following followers');
-            const updatedTargetUser = await User.findById(followId).select('following followers');
-            
-            if (!updatedUser || !updatedTargetUser) {
-                return res.status(500).json({ message: "Failed to verify user data" });
-            }
-
-            // Verify the operation succeeded
-            const verifyNotFollowing = !(updatedUser.following || []).some((id) => String(id) === followIdStr);
-            
-            res.status(200).json({
-                message: "Unfollowed successfully",
-                isFollowing: false,
-                current: {
-                    _id: updatedUser._id,
-                    following: updatedUser.following || [],
-                    followers: updatedUser.followers || [],
-                    counts: { 
-                        following: (updatedUser.following || []).length, 
-                        followers: (updatedUser.followers || []).length 
-                    }
-                },
-                target: {
-                    _id: updatedTargetUser._id,
-                    following: updatedTargetUser.following || [],
-                    followers: updatedTargetUser.followers || [],
-                    counts: { 
-                        following: (updatedTargetUser.following || []).length, 
-                        followers: (updatedTargetUser.followers || []).length 
-                    }
-                }
-            });
-        }
+        res.status(200).json({ message: "Friend request sent" });
     } catch (error) {
-        console.error("Follow user error:", error);
-        res.status(500).json({ message: error.message || "An error occurred while processing your request" });
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const confirmFriendRequest = async (req, res) => {
+    const { friendId } = req.body;
+    const userId = req.userid;
+
+    try {
+        const user = await User.findById(userId);
+        const friend = await User.findById(friendId);
+
+        if (!user || !friend) return res.status(404).json({ message: "User not found" });
+
+        user.receivedFriendRequests = user.receivedFriendRequests.filter(id => id.toString() !== friendId);
+        friend.sentFriendRequests = friend.sentFriendRequests.filter(id => id.toString() !== userId);
+
+        if (!user.friends.includes(friendId)) user.friends.push(friendId);
+        if (!friend.friends.includes(userId)) friend.friends.push(userId);
+
+        await Notification.create({
+            recipient: friendId,
+            sender: userId,
+            type: "FRIEND_ACCEPT"
+        });
+
+        await Promise.all([user.save(), friend.save()]);
+
+        res.status(200).json({ message: "Friend request confirmed" });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const rejectFriendRequest = async (req, res) => {
+    const { friendId } = req.body;
+    const userId = req.userid;
+
+    try {
+        const user = await User.findById(userId);
+        const friend = await User.findById(friendId);
+
+        user.receivedFriendRequests = user.receivedFriendRequests.filter(id => id.toString() !== friendId);
+        friend.sentFriendRequests = friend.sentFriendRequests.filter(id => id.toString() !== userId);
+
+        await Promise.all([user.save(), friend.save()]);
+
+        res.status(200).json({ message: "Friend request rejected" });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const getFriends = async (req, res) => {
+    const userId = req.userid;
+    try {
+        const user = await User.findById(userId).populate("friends", "name email joinDate");
+        res.status(200).json(user.friends);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const getFriendRequests = async (req, res) => {
+    const userId = req.userid;
+    try {
+        const user = await User.findById(userId).populate("receivedFriendRequests", "name email joinDate");
+        res.status(200).json(user.receivedFriendRequests);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const getNotifications = async (req, res) => {
+    const userId = req.userid;
+    try {
+        const notifications = await Notification.find({ recipient: userId })
+            .populate("sender", "name")
+            .sort({ createdAt: -1 });
+        res.status(200).json(notifications);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const markNotificationsRead = async (req, res) => {
+    const userId = req.userid;
+    try {
+        await Notification.updateMany({ recipient: userId, read: false }, { read: true });
+        res.status(200).json({ message: "Notifications marked as read" });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
     }
 };
 
@@ -255,63 +247,29 @@ export const searchUsers = async (req, res) => {
                 { name: { $regex: cleanQuery, $options: "i" } },
                 { email: { $regex: cleanQuery, $options: "i" } }
             ]
-        }).select("name email followers following joinDate about tags");
+        }).select("name email friends sentFriendRequests receivedFriendRequests joinDate about tags");
 
-        console.log(`Search for "${query}" found ${users.length} users`);
         res.status(200).json(users);
     } catch (error) {
-        console.error("Search error:", error);
         res.status(500).json({ message: error.message });
     }
 };
 
-export const getFollowers = async (req, res) => {
+export const removeFriend = async (req, res) => {
+    const { friendId } = req.params;
     const userId = req.userid;
-
-    if (!userId) return res.status(403).json({ message: "Unauthenticated" });
-
-    try {
-        const user = await User.findById(userId).populate('followers', 'name email joinDate');
-        if (!user) return res.status(404).json({ message: "User not found" });
-
-        res.status(200).json(user.followers);
-    } catch (error) {
-        console.error("Get followers error:", error);
-        res.status(500).json({ message: error.message });
-    }
-};
-
-export const removeFollower = async (req, res) => {
-    const { followerId } = req.params;
-    const userId = req.userid;
-
-    if (!userId) return res.status(403).json({ message: "Unauthenticated" });
-    if (userId === followerId) return res.status(400).json({ message: "Invalid operation" });
 
     try {
         const user = await User.findById(userId);
-        const follower = await User.findById(followerId);
+        const friend = await User.findById(friendId);
 
-        if (!follower) return res.status(404).json({ message: "Follower not found" });
+        user.friends = user.friends.filter(id => id.toString() !== friendId);
+        friend.friends = friend.friends.filter(id => id.toString() !== userId);
 
-        // Remove follower from YOUR followers list
-        user.followers = user.followers.filter(id => id.toString() !== followerId);
+        await Promise.all([user.save(), friend.save()]);
 
-        // Remove YOU from THEIR following list
-        follower.following = follower.following.filter(id => id.toString() !== userId);
-
-        // ALSO remove them from YOUR following list (if you were following them)
-        user.following = user.following.filter(id => id.toString() !== followerId);
-
-        // ALSO remove you from THEIR followers list (if they had you as follower)
-        follower.followers = follower.followers.filter(id => id.toString() !== userId);
-
-        await user.save();
-        await follower.save();
-
-        res.status(200).json({ message: "Follower removed successfully" });
+        res.status(200).json({ message: "Friend removed" });
     } catch (error) {
-        console.error("Remove follower error:", error);
         res.status(500).json({ message: error.message });
     }
 };

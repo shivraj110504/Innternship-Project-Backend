@@ -11,6 +11,33 @@ import { generateRandomPassword } from "../utils/passwordUtils.js";
 import https from "https";
 import { sendFast2Sms } from "../utils/fast2sms.js";
 
+export const awardBadges = async (userId) => {
+  try {
+    const userDoc = await user.findById(userId);
+    if (!userDoc) return;
+
+    let points = userDoc.points || 0;
+    let gold = 0;
+    let silver = 0;
+    let bronze = 0;
+
+    // Bronze: 10 pts, Silver: 50 pts, Gold: 100 pts
+    if (points >= 100) gold = 1;
+    if (points >= 50) silver = 1;
+    if (points >= 10) bronze = 1;
+
+    await user.findByIdAndUpdate(userId, {
+      $set: {
+        goldBadges: gold,
+        silverBadges: silver,
+        bronzeBadges: bronze
+      }
+    });
+  } catch (e) {
+    console.log("Badge error:", e);
+  }
+};
+
 const sendOtpEmail = async (email, otp) => {
   console.log(`[RESEND] Attempting to send OTP email to: ${email}`);
 
@@ -134,6 +161,11 @@ export const transferPoints = async (req, res) => {
     to.points = (to.points || 0) + amt;
     await from.save();
     await to.save();
+
+    // Re-check badges for both after point changes
+    await awardBadges(fromUserId);
+    await awardBadges(toUserId);
+
     res.status(200).json({ message: "Transfer successful", fromPoints: from.points, toPoints: to.points });
   } catch (error) {
     console.error("Transfer Points Error:", error);
@@ -200,8 +232,9 @@ export const Signup = async (req, res) => {
       email,
       password: hashpassword,
       ...(phone ? { phone } : {}),
-      followers: [],
-      following: [],
+      friends: [],
+      sentFriendRequests: [],
+      receivedFriendRequests: [],
       goldBadges: 0,
       silverBadges: 0,
       bronzeBadges: 0,

@@ -5,10 +5,15 @@ import {
     getallposts,
     likePost,
     commentPost,
-    followUser,
+    sendFriendRequest,
+    confirmFriendRequest,
+    rejectFriendRequest,
+    getFriends,
+    getFriendRequests,
+    getNotifications,
+    markNotificationsRead,
     searchUsers,
-    getFollowers,
-    removeFollower,
+    removeFriend,
 } from "../controller/post.js";
 
 const router = express.Router();
@@ -17,9 +22,19 @@ router.post("/create", auth, createPost);
 router.get("/getall", getallposts);
 router.patch("/like/:id", auth, likePost);
 router.post("/comment/:id", auth, commentPost);
-router.post("/follow", auth, followUser);
+
+// Friend System
+router.post("/friend/request", auth, sendFriendRequest);
+router.post("/friend/confirm", auth, confirmFriendRequest);
+router.post("/friend/reject", auth, rejectFriendRequest);
+router.get("/friends", auth, getFriends);
+router.get("/friend-requests", auth, getFriendRequests);
+router.delete("/friend/:friendId", auth, removeFriend);
+
+// Notifications
+router.get("/notifications", auth, getNotifications);
+router.patch("/notifications/read", auth, markNotificationsRead);
+
 router.get("/search", searchUsers);
-router.get("/followers", auth, getFollowers);
-router.delete("/follower/:followerId", auth, removeFollower);
 
 export default router;

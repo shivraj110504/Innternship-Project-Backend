@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import question from "../models/question.js";
 import user from "../models/auth.js";
+import { awardBadges } from "./auth.js";
 
 export const Askanswer = async (req, res) => {
   const { id: _id } = req.params;
@@ -17,6 +18,7 @@ export const Askanswer = async (req, res) => {
     // Reward +5 points to the answer author
     try {
       await user.findByIdAndUpdate(userid, { $inc: { points: 5 } });
+      await awardBadges(userid);
     } catch (e) {
       console.log("Failed to add points:", e?.message || e);
     }
@@ -86,6 +88,7 @@ export const voteanswer = async (req, res) => {
     if (authorPointDelta !== 0 && ans.userid) {
       try {
         await user.findByIdAndUpdate(ans.userid, { $inc: { points: authorPointDelta } });
+        await awardBadges(ans.userid);
       } catch (e) {
         console.log("Failed to adjust author points:", e?.message || e);
       }
@@ -128,6 +131,7 @@ export const deleteanswer = async (req, res) => {
     if (targetAns?.userid) {
       try {
         await user.findByIdAndUpdate(targetAns.userid, { $inc: { points: -5 } });
+        await awardBadges(targetAns.userid);
       } catch (e) {
         console.log("Failed to deduct points:", e?.message || e);
       }
