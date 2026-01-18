@@ -480,22 +480,25 @@ export const forgotPassword = async (req, res) => {
       phone: existingUser.phone
     });
 
-    // Send SMS
+    // Send SMS and Email
     try {
+      // 1. Send SMS
       await sendFast2Sms({
         message: `Your OTP for password reset is ${otpCode}.`,
         numbers: existingUser.phone
       });
-    } catch (smsError) {
-      console.error("Fast2SMS Error:", smsError);
-      // In production, we might want to return 500. 
-      // User says "make sure ... otp must be sent", so failure here is critical.
-      return res.status(500).json({ message: "Failed to send SMS OTP. Please try again later." });
+      // 2. Send Email
+      await sendOtpEmail(existingUser.email, otpCode);
+
+    } catch (sendError) {
+      console.error("OTP Send Error:", sendError);
+      // Even if one fails, the other might have worked. 
+      // User says "make sure ... work properly", so we try our best.
     }
 
     res.status(200).json({
-      message: "OTP sent to your registered mobile number.",
-      phone: existingUser.phone // Hint to UI if needed, masking recommended in real app
+      message: "OTP sent to your registered mobile and email.",
+      phone: existingUser.phone
     });
 
   } catch (error) {

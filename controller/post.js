@@ -139,6 +139,7 @@ export const sendFriendRequest = async (req, res) => {
 
         await Promise.all([user.save(), targetUser.save()]);
 
+        // Added point/badge check for good measure if needed, but here just friends
         res.status(200).json({ message: "Friend request sent" });
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -248,14 +249,31 @@ export const searchUsers = async (req, res) => {
 
     try {
         const cleanQuery = query.replace(/^@/, "");
-        const users = await User.find({
+        const results = await User.find({
             $or: [
                 { name: { $regex: cleanQuery, $options: "i" } },
                 { email: { $regex: cleanQuery, $options: "i" } }
             ]
         }).select("name email friends sentFriendRequests receivedFriendRequests joinDate about tags");
 
-        res.status(200).json(users);
+        const me = req.userid ? await User.findById(req.userid) : null;
+
+        const usersWithStatus = results.map(u => {
+            let status = "none";
+            if (me) {
+                const uid = u._id.toString();
+                if (me.friends.some(id => id.toString() === uid)) {
+                    status = "friends";
+                } else if (me.sentFriendRequests.some(id => id.toString() === uid)) {
+                    status = "request_sent";
+                } else if (me.receivedFriendRequests.some(id => id.toString() === uid)) {
+                    status = "request_received";
+                }
+            }
+            return { ...u.toObject(), friendStatus: status };
+        });
+
+        res.status(200).json(usersWithStatus);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
