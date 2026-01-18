@@ -112,42 +112,47 @@ export const commentPost = async (req, res) => {
     }
 };
 
-try {
-    const uId = new mongoose.Types.ObjectId(userId);
-    const fId = new mongoose.Types.ObjectId(friendId);
+export const sendFriendRequest = async (req, res) => {
+    const { friendId } = req.body;
+    const userId = req.userid;
 
-    if (uId.equals(fId)) return res.status(400).json({ message: "You cannot add yourself as friend" });
+    try {
+        const uId = new mongoose.Types.ObjectId(userId);
+        const fId = new mongoose.Types.ObjectId(friendId);
 
-    const [user, targetUser] = await Promise.all([
-        User.findById(uId),
-        User.findById(fId)
-    ]);
+        if (uId.equals(fId)) return res.status(400).json({ message: "You cannot add yourself as friend" });
 
-    if (!user || !targetUser) return res.status(404).json({ message: "User not found" });
+        const [user, targetUser] = await Promise.all([
+            User.findById(uId),
+            User.findById(fId)
+        ]);
 
-    const isAlreadyFriend = user.friends.some(id => id.toString() === fId.toString());
-    if (isAlreadyFriend) return res.status(400).json({ message: "Already friends" });
+        if (!user || !targetUser) return res.status(404).json({ message: "User not found" });
 
-    const isRequestAlreadySent = user.sentFriendRequests.some(id => id.toString() === fId.toString());
-    if (isRequestAlreadySent) return res.status(400).json({ message: "Request already sent" });
+        const isAlreadyFriend = user.friends.some(id => id.toString() === fId.toString());
+        if (isAlreadyFriend) return res.status(400).json({ message: "Already friends" });
 
-    // Atomic update
-    await Promise.all([
-        User.findByIdAndUpdate(uId, { $addToSet: { sentFriendRequests: fId } }),
-        User.findByIdAndUpdate(fId, { $addToSet: { receivedFriendRequests: uId } })
-    ]);
+        const isRequestAlreadySent = user.sentFriendRequests.some(id => id.toString() === fId.toString());
+        if (isRequestAlreadySent) return res.status(400).json({ message: "Request already sent" });
 
-    await Notification.create({
-        recipient: fId,
-        sender: uId,
-        type: "FRIEND_REQUEST"
-    });
+        // Atomic update
+        await Promise.all([
+            User.findByIdAndUpdate(uId, { $addToSet: { sentFriendRequests: fId } }),
+            User.findByIdAndUpdate(fId, { $addToSet: { receivedFriendRequests: uId } })
+        ]);
 
-    console.log(`[FRIEND] Request sent from ${uId} to ${fId}`);
-    res.status(200).json({ message: "Friend request sent" });
-} catch (error) {
-    console.error("Send Friend Request Error:", error);
-    res.status(500).json({ message: error.message });
+        await Notification.create({
+            recipient: fId,
+            sender: uId,
+            type: "FRIEND_REQUEST"
+        });
+
+        console.log(`[FRIEND] Request sent from ${uId} to ${fId}`);
+        res.status(200).json({ message: "Friend request sent" });
+    } catch (error) {
+        console.error("Send Friend Request Error:", error);
+        res.status(500).json({ message: error.message });
+    }
 };
 
 export const confirmFriendRequest = async (req, res) => {
