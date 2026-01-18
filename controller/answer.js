@@ -9,23 +9,30 @@ export const Askanswer = async (req, res) => {
     return res.status(400).json({ message: "question unavailable" });
   }
   const { noofanswer, answerbody, useranswered, userid } = req.body;
-  updatenoofanswer(_id, noofanswer);
 
   try {
+    await updatenoofanswer(_id, noofanswer);
+
     const updatequestion = await question.findByIdAndUpdate(_id, {
       $addToSet: { answer: [{ answerbody, useranswered, userid }] },
     });
+
+    if (!updatequestion) {
+      console.error(`[ANSWER] Question not found for reply: ${_id}`);
+      return res.status(404).json({ message: "Question not found" });
+    }
+
     // Reward +5 points to the answer author
     try {
       await user.findByIdAndUpdate(userid, { $inc: { points: 5 } });
       await awardBadges(userid);
     } catch (e) {
-      console.log("Failed to add points:", e?.message || e);
+      console.error(`[ANSWER] Failed to add points for user ${userid}:`, e?.message || e);
     }
     res.status(200).json({ data: updatequestion });
   } catch (error) {
-    console.log(error);
-    res.status(500).json("something went wrong..");
+    console.error(`[ANSWER] Error posting answer to question ${_id}:`, error);
+    res.status(500).json({ message: "Something went wrong while posting your answer." });
     return;
   }
 };

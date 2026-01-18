@@ -35,6 +35,6 @@ router.delete("/friend/:friendId", auth, removeFriend);
 router.get("/notifications", auth, getNotifications);
 router.patch("/notifications/read", auth, markNotificationsRead);
 
-router.get("/search", searchUsers);
+router.get("/search", auth, searchUsers);
 
 export default router;

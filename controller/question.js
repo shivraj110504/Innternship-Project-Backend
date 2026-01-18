@@ -11,10 +11,14 @@ export const Askquestion = async (req, res) => {
 
   try {
     const userData = await User.findById(userId);
-    if (!userData) return res.status(404).json({ message: "User not found" });
+    if (!userData) {
+      console.error(`[POST] User not found: ${userId}`);
+      return res.status(404).json({ message: "User not found" });
+    }
 
     // Use 'friends' array (replaced followers/following)
     const friendsCount = Array.isArray(userData.friends) ? userData.friends.length : 0;
+    console.log(`[POST] User ${userId} has ${friendsCount} friends. Friends array:`, userData.friends);
 
     // Rule: if no friends, cannot post
     if (friendsCount === 0) {
