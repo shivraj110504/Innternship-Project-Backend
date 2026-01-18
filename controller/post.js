@@ -112,43 +112,42 @@ export const commentPost = async (req, res) => {
     }
 };
 
-export const sendFriendRequest = async (req, res) => {
-    const { friendId } = req.body;
-    const userId = req.userid;
+try {
+    const uId = new mongoose.Types.ObjectId(userId);
+    const fId = new mongoose.Types.ObjectId(friendId);
 
-    if (!userId) return res.status(403).json({ message: "Unauthenticated" });
-    if (userId === friendId) return res.status(400).json({ message: "You cannot add yourself as friend" });
+    if (uId.equals(fId)) return res.status(400).json({ message: "You cannot add yourself as friend" });
 
-    try {
-        const user = await User.findById(userId);
-        const targetUser = await User.findById(friendId);
+    const [user, targetUser] = await Promise.all([
+        User.findById(uId),
+        User.findById(fId)
+    ]);
 
-        if (!user || !targetUser) return res.status(404).json({ message: "User not found" });
+    if (!user || !targetUser) return res.status(404).json({ message: "User not found" });
 
-        const isAlreadyFriend = user.friends.some(id => id.toString() === friendId.toString());
-        if (isAlreadyFriend) return res.status(400).json({ message: "Already friends" });
+    const isAlreadyFriend = user.friends.some(id => id.toString() === fId.toString());
+    if (isAlreadyFriend) return res.status(400).json({ message: "Already friends" });
 
-        const isRequestAlreadySent = user.sentFriendRequests.some(id => id.toString() === friendId.toString());
-        if (isRequestAlreadySent) return res.status(400).json({ message: "Request already sent" });
+    const isRequestAlreadySent = user.sentFriendRequests.some(id => id.toString() === fId.toString());
+    if (isRequestAlreadySent) return res.status(400).json({ message: "Request already sent" });
 
-        // Atomic update
-        await Promise.all([
-            User.findByIdAndUpdate(userId, { $addToSet: { sentFriendRequests: friendId } }),
-            User.findByIdAndUpdate(friendId, { $addToSet: { receivedFriendRequests: userId } })
-        ]);
+    // Atomic update
+    await Promise.all([
+        User.findByIdAndUpdate(uId, { $addToSet: { sentFriendRequests: fId } }),
+        User.findByIdAndUpdate(fId, { $addToSet: { receivedFriendRequests: uId } })
+    ]);
 
-        await Notification.create({
-            recipient: friendId,
-            sender: userId,
-            type: "FRIEND_REQUEST"
-        });
+    await Notification.create({
+        recipient: fId,
+        sender: uId,
+        type: "FRIEND_REQUEST"
+    });
 
-        console.log(`[FRIEND] Request sent from ${userId} to ${friendId}`);
-        res.status(200).json({ message: "Friend request sent" });
-    } catch (error) {
-        console.error("Send Friend Request Error:", error);
-        res.status(500).json({ message: error.message });
-    }
+    console.log(`[FRIEND] Request sent from ${uId} to ${fId}`);
+    res.status(200).json({ message: "Friend request sent" });
+} catch (error) {
+    console.error("Send Friend Request Error:", error);
+    res.status(500).json({ message: error.message });
 };
 
 export const confirmFriendRequest = async (req, res) => {
@@ -156,27 +155,30 @@ export const confirmFriendRequest = async (req, res) => {
     const userId = req.userid;
 
     try {
-        // Atomic updates
+        const uId = new mongoose.Types.ObjectId(userId);
+        const fId = new mongoose.Types.ObjectId(friendId);
+
+        // Atomic updates: remove from requests AND add to friends
         const [updatedUser, updatedFriend] = await Promise.all([
-            User.findByIdAndUpdate(userId, {
-                $pull: { receivedFriendRequests: friendId },
-                $addToSet: { friends: friendId }
+            User.findByIdAndUpdate(uId, {
+                $pull: { receivedFriendRequests: fId, sentFriendRequests: fId },
+                $addToSet: { friends: fId }
             }, { new: true }),
-            User.findByIdAndUpdate(friendId, {
-                $pull: { sentFriendRequests: userId },
-                $addToSet: { friends: userId }
+            User.findByIdAndUpdate(fId, {
+                $pull: { sentFriendRequests: uId, receivedFriendRequests: uId },
+                $addToSet: { friends: uId }
             }, { new: true })
         ]);
 
         if (!updatedUser || !updatedFriend) return res.status(404).json({ message: "User not found" });
 
         await Notification.create({
-            recipient: friendId,
-            sender: userId,
+            recipient: fId,
+            sender: uId,
             type: "FRIEND_ACCEPT"
         });
 
-        console.log(`[FRIEND] Request confirmed between ${userId} and ${friendId}`);
+        console.log(`[FRIEND] Request confirmed between ${uId} and ${fId}`);
         res.status(200).json({ message: "Friend request confirmed" });
     } catch (error) {
         console.error("Confirm Friend Request Error:", error);
@@ -189,18 +191,21 @@ export const rejectFriendRequest = async (req, res) => {
     const userId = req.userid;
 
     try {
+        const uId = new mongoose.Types.ObjectId(userId);
+        const fId = new mongoose.Types.ObjectId(friendId);
+
         await Promise.all([
-            User.findByIdAndUpdate(userId, { $pull: { receivedFriendRequests: friendId } }),
-            User.findByIdAndUpdate(friendId, { $pull: { sentFriendRequests: userId } })
+            User.findByIdAndUpdate(uId, { $pull: { receivedFriendRequests: fId } }),
+            User.findByIdAndUpdate(fId, { $pull: { sentFriendRequests: uId } })
         ]);
 
         await Notification.create({
-            recipient: friendId,
-            sender: userId,
+            recipient: fId,
+            sender: uId,
             type: "FRIEND_REJECT"
         });
 
-        console.log(`[FRIEND] Request rejected by ${userId} for ${friendId}`);
+        console.log(`[FRIEND] Request rejected by ${uId} for ${fId}`);
         res.status(200).json({ message: "Friend request rejected" });
     } catch (error) {
         console.error("Reject Friend Request Error:", error);
@@ -213,7 +218,9 @@ export const getFriends = async (req, res) => {
     try {
         const userData = await User.findById(userId).populate("friends", "name email joinDate");
         if (!userData) return res.status(404).json({ message: "User not found" });
-        res.status(200).json(userData.friends || []);
+        // Filter out any friends that failed to populate (e.g. deleted users)
+        const activeFriends = (userData.friends || []).filter(f => f && f._id);
+        res.status(200).json(activeFriends);
     } catch (error) {
         console.error("getFriends Error:", error);
         res.status(500).json({ message: error.message });
@@ -225,7 +232,9 @@ export const getFriendRequests = async (req, res) => {
     try {
         const userData = await User.findById(userId).populate("receivedFriendRequests", "name email joinDate");
         if (!userData) return res.status(404).json({ message: "User not found" });
-        res.status(200).json(userData.receivedFriendRequests || []);
+        // Filter out nulls
+        const activeRequests = (userData.receivedFriendRequests || []).filter(r => r && r._id);
+        res.status(200).json(activeRequests);
     } catch (error) {
         console.error("getFriendRequests Error:", error);
         res.status(500).json({ message: error.message });
@@ -272,15 +281,17 @@ export const searchUsers = async (req, res) => {
         const usersWithStatus = results.map(u => {
             let status = "none";
             if (me) {
-                const uid = u._id.toString();
-                // Check if it's "me"
-                if (uid === me._id.toString()) return null;
+                const uidString = u._id.toString();
+                const myIdString = me._id.toString();
 
-                if (me.friends.some(id => id.toString() === uid)) {
+                // Check if it's "me"
+                if (uidString === myIdString) return null;
+
+                if (me.friends && me.friends.some(id => id.toString() === uidString)) {
                     status = "friends";
-                } else if (me.sentFriendRequests.some(id => id.toString() === uid)) {
+                } else if (me.sentFriendRequests && me.sentFriendRequests.some(id => id.toString() === uidString)) {
                     status = "request_sent";
-                } else if (me.receivedFriendRequests.some(id => id.toString() === uid)) {
+                } else if (me.receivedFriendRequests && me.receivedFriendRequests.some(id => id.toString() === uidString)) {
                     status = "request_received";
                 }
             }
