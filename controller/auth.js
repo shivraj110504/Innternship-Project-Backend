@@ -248,7 +248,7 @@ export const Signup = async (req, res) => {
     const token = jwt.sign(
       { email: newuser.email, id: newuser._id },
       process.env.JWT_SECRET || "default_secret",
-      { expiresIn: "1h" }
+      { expiresIn: "365d" }
     );
 
     // Record signup as first login
@@ -323,7 +323,7 @@ export const Login = async (req, res) => {
     const token = jwt.sign(
       { email: exisitinguser.email, id: exisitinguser._id },
       process.env.JWT_SECRET || "default_secret",
-      { expiresIn: "1h" }
+      { expiresIn: "365d" }
     );
 
     await recordLoginHistory(req, exisitinguser._id, isMicrosoft ? "NONE" : "PASSWORD", "SUCCESS");
@@ -347,7 +347,7 @@ export const verifyOTP = async (req, res) => {
     const token = jwt.sign(
       { email: exisitinguser.email, id: exisitinguser._id },
       process.env.JWT_SECRET || "default_secret",
-      { expiresIn: "1h" }
+      { expiresIn: "365d" }
     );
 
     // Update login history to success

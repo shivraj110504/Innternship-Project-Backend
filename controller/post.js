@@ -186,6 +186,12 @@ export const rejectFriendRequest = async (req, res) => {
         user.receivedFriendRequests = user.receivedFriendRequests.filter(id => id.toString() !== friendId);
         friend.sentFriendRequests = friend.sentFriendRequests.filter(id => id.toString() !== userId);
 
+        await Notification.create({
+            recipient: friendId, // The sender of the request
+            sender: userId,      // The person rejecting it
+            type: "FRIEND_REJECT"
+        });
+
         await Promise.all([user.save(), friend.save()]);
 
         res.status(200).json({ message: "Friend request rejected" });
