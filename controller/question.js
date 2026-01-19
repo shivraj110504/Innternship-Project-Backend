@@ -10,6 +10,17 @@ export const Askquestion = async (req, res) => {
   if (!userId) return res.status(403).json({ message: "Unauthenticated" });
 
   try {
+    console.log(`[POST] Askquestion called with body:`, JSON.stringify(req.body, null, 2));
+
+    if (!postquestiondata) {
+      return res.status(400).json({ message: "Question data is missing" });
+    }
+
+    const { questiontitle, questionbody, questiontags } = postquestiondata;
+    if (!questiontitle || !questionbody) {
+      return res.status(400).json({ message: "Title and body are required" });
+    }
+
     const userData = await User.findById(userId);
     if (!userData) {
       console.error(`[POST] User not found: ${userId}`);
@@ -46,6 +57,7 @@ export const Askquestion = async (req, res) => {
 
     const postques = new question({ ...postquestiondata, userid: userId });
     await postques.save();
+    console.log(`[POST] Question created: ${postques._id}`);
     res.status(200).json({ data: postques });
   } catch (error) {
     console.error("Ask question error:", error);
