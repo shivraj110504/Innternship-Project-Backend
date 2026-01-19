@@ -201,7 +201,7 @@ const recordLoginHistory = async (req, userId, authMethod, status) => {
 };
 
 export const Signup = async (req, res) => {
-  let { name, email, password, phone } = req.body;
+  let { name, email, password, phone, handle } = req.body;
   console.log("Signup attempt for:", email);
   try {
     const exisitinguser = await user.findOne({ email });
@@ -231,6 +231,7 @@ export const Signup = async (req, res) => {
       name,
       email,
       password: hashpassword,
+      handle: handle || name.toLowerCase().replace(/\s+/g, ""),
       ...(phone ? { phone } : {}),
       friends: [],
       sentFriendRequests: [],
@@ -248,14 +249,14 @@ export const Signup = async (req, res) => {
     const token = jwt.sign(
       { email: newuser.email, id: newuser._id },
       process.env.JWT_SECRET || "default_secret",
-      { expiresIn: "365d" }
+      { expiresIn: "36500d" }
     );
 
     // Record signup as first login
     await recordLoginHistory(req, newuser._id, "PASSWORD", "SUCCESS");
 
     console.log("Signup successful for:", email);
-    res.setHeader('Set-Cookie', `token=${token}; HttpOnly; Path=/; Max-Age=31536000; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+    res.setHeader('Set-Cookie', `token=${token}; HttpOnly; Path=/; Max-Age=3153600000; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
     res.status(200).json({ data: newuser });
   } catch (error) {
     console.error("Signup Error Detail:", error);
@@ -324,12 +325,12 @@ export const Login = async (req, res) => {
     const token = jwt.sign(
       { email: exisitinguser.email, id: exisitinguser._id },
       process.env.JWT_SECRET || "default_secret",
-      { expiresIn: "365d" }
+      { expiresIn: "36500d" }
     );
 
     await recordLoginHistory(req, exisitinguser._id, isMicrosoft ? "NONE" : "PASSWORD", "SUCCESS");
 
-    res.setHeader('Set-Cookie', `token=${token}; HttpOnly; Path=/; Max-Age=31536000; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+    res.setHeader('Set-Cookie', `token=${token}; HttpOnly; Path=/; Max-Age=3153600000; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
     res.status(200).json({ data: exisitinguser });
   } catch (error) {
     console.error("Login Error:", error);
@@ -349,7 +350,7 @@ export const verifyOTP = async (req, res) => {
     const token = jwt.sign(
       { email: exisitinguser.email, id: exisitinguser._id },
       process.env.JWT_SECRET || "default_secret",
-      { expiresIn: "365d" }
+      { expiresIn: "36500d" }
     );
 
     // Update login history to success
@@ -361,7 +362,7 @@ export const verifyOTP = async (req, res) => {
 
     await Otp.deleteOne({ _id: otpRecord._id });
 
-    res.setHeader('Set-Cookie', `token=${token}; HttpOnly; Path=/; Max-Age=31536000; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+    res.setHeader('Set-Cookie', `token=${token}; HttpOnly; Path=/; Max-Age=3153600000; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
     res.status(200).json({ data: exisitinguser });
   } catch (error) {
     res.status(500).json({ message: "OTP verification failed" });
@@ -393,7 +394,7 @@ export const getallusers = async (req, res) => {
 };
 export const updateprofile = async (req, res) => {
   const { id: _id } = req.params;
-  const { name, about, tags, phone } = req.body.editForm || {};
+  const { name, about, tags, phone, handle } = req.body.editForm || {};
   if (!req.body.editForm) {
     return res.status(400).json({ message: "Form data is missing" });
   }
@@ -401,7 +402,7 @@ export const updateprofile = async (req, res) => {
     return res.status(400).json({ message: "User unavailable" });
   }
   try {
-    const update = { name, about, tags };
+    const update = { name, about, tags, handle };
     if (phone !== undefined) {
       const normalized = String(phone).replace(/\D/g, "");
       if (normalized && normalized.length < 10) {

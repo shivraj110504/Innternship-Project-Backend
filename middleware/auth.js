@@ -21,13 +21,13 @@ const auth = (req, res, next) => {
     }
 
     if (!token) {
-      return res.status(401).json({ message: "Unauthenticated - No token provided" });
+      return res.status(401).json({ message: "Please login to continue" });
     }
 
     // Verify token
     const decodedata = jwt.verify(token, process.env.JWT_SECRET);
     if (!decodedata || !decodedata.id) {
-      return res.status(401).json({ message: "Unauthenticated - Invalid token" });
+      return res.status(401).json({ message: "Please login to continue" });
     }
 
     req.userid = decodedata.id;

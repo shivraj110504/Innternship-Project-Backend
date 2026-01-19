@@ -14,6 +14,7 @@ import {
     markNotificationsRead,
     searchUsers,
     removeFriend,
+    sharePost,
 } from "../controller/post.js";
 
 const router = express.Router();
@@ -22,6 +23,7 @@ router.post("/create", auth, createPost);
 router.get("/getall", getallposts);
 router.patch("/like/:id", auth, likePost);
 router.post("/comment/:id", auth, commentPost);
+router.patch("/share/:id", sharePost);
 
 // Friend System
 router.post("/friend/request", auth, sendFriendRequest);

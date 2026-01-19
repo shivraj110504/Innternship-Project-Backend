@@ -284,9 +284,10 @@ export const searchUsers = async (req, res) => {
         const results = await User.find({
             $or: [
                 { name: { $regex: cleanQuery, $options: "i" } },
-                { email: { $regex: cleanQuery, $options: "i" } }
+                { email: { $regex: cleanQuery, $options: "i" } },
+                { handle: { $regex: cleanQuery, $options: "i" } }
             ]
-        }).select("name email friends sentFriendRequests receivedFriendRequests joinDate about tags");
+        }).select("name email handle friends sentFriendRequests receivedFriendRequests joinDate about tags");
 
         const me = req.userid ? await User.findById(req.userid) : null;
 
@@ -331,6 +332,16 @@ export const removeFriend = async (req, res) => {
         res.status(200).json({ message: "Friend removed" });
     } catch (error) {
         console.error("Remove Friend Error:", error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
+export const sharePost = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const updatedPost = await Post.findByIdAndUpdate(id, { $inc: { shares: 1 } }, { new: true });
+        res.status(200).json(updatedPost);
+    } catch (error) {
         res.status(500).json({ message: error.message });
     }
 };
