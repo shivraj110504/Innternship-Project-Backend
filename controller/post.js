@@ -280,41 +280,59 @@ export const searchUsers = async (req, res) => {
     if (!query) return res.status(200).json([]);
 
     try {
-        const cleanQuery = query.replace(/^@/, "");
+        const cleanQuery = query.replace(/^@/, "").trim();
+        // Use a case-insensitive regex that escapes potential special characters
+        const safeQuery = cleanQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(safeQuery, "i");
+
         const results = await User.find({
             $or: [
-                { name: { $regex: cleanQuery, $options: "i" } },
-                { email: { $regex: cleanQuery, $options: "i" } },
-                { handle: { $regex: cleanQuery, $options: "i" } }
+                { name: { $regex: regex } },
+                { email: { $regex: regex } },
+                { handle: { $regex: regex } }
             ]
-        }).select("name email handle friends sentFriendRequests receivedFriendRequests joinDate about tags");
+        }).select("name email handle friends sentFriendRequests receivedFriendRequests joinDate about tags").lean();
 
-        const me = req.userid ? await User.findById(req.userid) : null;
+        const myIdString = req.userid ? String(req.userid) : null;
 
         const usersWithStatus = results.map(u => {
+            // Check if it's "me"
+            if (String(u._id) === myIdString) return null;
+
             let status = "none";
-            if (me) {
-                const uidString = u._id.toString();
-                const myIdString = me._id.toString();
+            if (myIdString) {
+                const uidString = String(u._id);
 
-                // Check if it's "me"
-                if (uidString === myIdString) return null;
-
-                if (me.friends && me.friends.some(id => id.toString() === uidString)) {
-                    status = "friends";
-                } else if (me.sentFriendRequests && me.sentFriendRequests.some(id => id.toString() === uidString)) {
-                    status = "request_sent";
-                } else if (me.receivedFriendRequests && me.receivedFriendRequests.some(id => id.toString() === uidString)) {
-                    status = "request_received";
-                }
+                // Compare with current user's friend lists
+                // Note: Since we used .lean(), we need to handle these as POJOs or find the 'me' doc
+                // To keep it simple and correct, we'll check if u._id is in me's lists
+                // But we don't have 'me' doc here yet to avoid another query if possible.
+                // However, statuses like friendStatus are usually better fetched by checking the current user's lists.
             }
-            return { ...u.toObject(), friendStatus: status };
+            return { ...u, friendStatus: status };
         }).filter(u => u !== null);
+
+        // If we want status, we DO need the 'me' document once.
+        if (myIdString && usersWithStatus.length > 0) {
+            const me = await User.findById(myIdString).lean();
+            if (me) {
+                usersWithStatus.forEach(tempUser => {
+                    const tid = String(tempUser._id);
+                    if (me.friends && me.friends.some(id => String(id) === tid)) {
+                        tempUser.friendStatus = "friends";
+                    } else if (me.sentFriendRequests && me.sentFriendRequests.some(id => String(id) === tid)) {
+                        tempUser.friendStatus = "request_sent";
+                    } else if (me.receivedFriendRequests && me.receivedFriendRequests.some(id => String(id) === tid)) {
+                        tempUser.friendStatus = "request_received";
+                    }
+                });
+            }
+        }
 
         res.status(200).json(usersWithStatus);
     } catch (error) {
         console.error("searchUsers Error:", error);
-        res.status(500).json({ message: error.message });
+        res.status(500).json({ message: "Failed to search users" });
     }
 };
 
