@@ -296,21 +296,9 @@ export const searchUsers = async (req, res) => {
         const myIdString = req.userid ? String(req.userid) : null;
 
         const usersWithStatus = results.map(u => {
-            // Check if it's "me"
-            if (String(u._id) === myIdString) return null;
-
             let status = "none";
-            if (myIdString) {
-                const uidString = String(u._id);
-
-                // Compare with current user's friend lists
-                // Note: Since we used .lean(), we need to handle these as POJOs or find the 'me' doc
-                // To keep it simple and correct, we'll check if u._id is in me's lists
-                // But we don't have 'me' doc here yet to avoid another query if possible.
-                // However, statuses like friendStatus are usually better fetched by checking the current user's lists.
-            }
             return { ...u, friendStatus: status };
-        }).filter(u => u !== null);
+        });
 
         // If we want status, we DO need the 'me' document once.
         if (myIdString && usersWithStatus.length > 0) {
