@@ -281,9 +281,10 @@ export const searchUsers = async (req, res) => {
 
     try {
         const cleanQuery = query.replace(/^@/, "").trim();
-        // Use a case-insensitive regex that escapes potential special characters
         const safeQuery = cleanQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const regex = new RegExp(safeQuery, "i");
+
+        console.log(`[SEARCH] Query: "${query}" -> Regex: ${regex}`);
 
         const results = await User.find({
             $or: [
@@ -291,7 +292,9 @@ export const searchUsers = async (req, res) => {
                 { email: { $regex: regex } },
                 { handle: { $regex: regex } }
             ]
-        }).select("name email handle friends sentFriendRequests receivedFriendRequests joinDate about tags").lean();
+        }).select("name email handle friends sentFriendRequests receivedFriendRequests joinDate about tags points goldBadges silverBadges bronzeBadges").lean();
+
+        console.log(`[SEARCH] Found ${results.length} results`);
 
         const myIdString = req.userid ? String(req.userid) : null;
 
