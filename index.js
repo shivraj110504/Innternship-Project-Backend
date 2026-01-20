@@ -8,7 +8,7 @@ import cookieParser from "cookie-parser";
 
 // Import routes
 import userRoutes from "./routes/auth.js";
-import questionRoutes from "./routes/question.js";
+import questionRoutes from "./routes/questions.js";
 import answerRoutes from "./routes/answers.js";
 import postRoutes from "./routes/posts.js"; // ADD THIS LINE
 import subscriptionRoutes from "./routes/subscription.js";
