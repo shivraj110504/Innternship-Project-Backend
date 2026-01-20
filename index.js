@@ -1,64 +1,48 @@
+// Training/stackoverflow/server/index.js
+
 import express from "express";
-import dotenv from "dotenv";
 import cors from "cors";
 import mongoose from "mongoose";
-import userroutes from "./routes/auth.js";
-import questionroute from "./routes/question.js";
-import answerroutes from "./routes/answer.js";
-import postroutes from "./routes/post.js";
-import subscriptionRoutes from "./routes/subscription.js";
-import timeGate from "./middleware/timeGate.js";
+import dotenv from "dotenv";
+import cookieParser from "cookie-parser";
 
-const app = express();
+// Import routes
+import userRoutes from "./routes/auth.js";
+import questionRoutes from "./routes/questions.js";
+import answerRoutes from "./routes/answers.js";
+import postRoutes from "./routes/posts.js"; // ADD THIS LINE
+import subscriptionRoutes from "./routes/subscription.js";
+import webhookRoutes from "./routes/webhook.js";
+
 dotenv.config();
 
-// IMPORTANT: Webhook route BEFORE express.json() middleware
-app.use("/subscription/webhook", subscriptionRoutes);
+const app = express();
 
-// Regular middleware
-app.use(express.json({ limit: "30mb", extended: true }));
-app.use(express.urlencoded({ limit: "30mb", extended: true }));
+// Middleware
 app.use(cors({
-  origin: ["http://localhost:3000", "https://innternship-project-stackoverflow.vercel.app"],
-  credentials: true,
-  methods: ["GET", "POST", "PATCH", "DELETE", "PUT", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  origin: process.env.FRONTEND_URL || "http://localhost:3000",
+  credentials: true
 }));
-app.use(timeGate);
-
-app.get("/", (req, res) => {
-  res.send("Stackoverflow clone with subscriptions is running");
-});
-
-app.get("/api/db-check", (req, res) => {
-  res.json({
-    host: mongoose.connection.host,
-    name: mongoose.connection.name,
-    readyState: mongoose.connection.readyState
-  });
-});
+app.use(cookieParser());
+app.use(express.json());
 
 // Routes
-app.use('/user', userroutes);
-app.use('/question', questionroute);
-app.use('/answer', answerroutes);
-app.use('/post', postroutes);
-app.use('/subscription', subscriptionRoutes);
+app.use("/user", userRoutes);
+app.use("/question", questionRoutes);
+app.use("/answer", answerRoutes);
+app.use("/post", postRoutes); // ADD THIS LINE
+app.use("/subscription", subscriptionRoutes);
+app.use("/webhook", webhookRoutes);
+
+// MongoDB connection
+mongoose.connect(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(() => console.log("✅ MongoDB connected"))
+.catch((err) => console.error("❌ MongoDB connection error:", err));
 
 const PORT = process.env.PORT || 5000;
-const databaseurl = process.env.MONGODB_URL || "mongodb://localhost:27017/stackoverflow";
-
-mongoose
-  .connect(databaseurl, { useNewUrlParser: true, useUnifiedTopology: true })
-  .then(() => {
-    console.log("✅ Connected to MongoDB");
-    console.log("Host:", mongoose.connection.host);
-    console.log("Database:", mongoose.connection.name);
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`💳 Stripe integration active`);
-    });
-  })
-  .catch((err) => {
-    console.error("❌ MongoDB connection error:", err.message);
-  });
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
