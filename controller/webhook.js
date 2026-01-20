@@ -1,3 +1,5 @@
+// Training/stackoverflow/server/controller/webhook.js
+
 import { stripe, getPlanDetails } from "../config/stripe.js";
 import Subscription from "../models/Subscription.js";
 import Payment from "../models/Payment.js";

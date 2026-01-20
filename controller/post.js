@@ -469,19 +469,42 @@ export const searchUsers = async (req, res) => {
       return res.status(400).json({ message: "Search query is required" });
     }
 
+    // Clean query - remove @ symbol if present and trim
+    const cleanQuery = query.trim().replace(/^@/, "");
+
+    console.log(`🔍 Search request - Query: "${cleanQuery}", User: ${currentUserId}`);
+
+    // Create flexible search patterns
+    const searchPattern = new RegExp(cleanQuery, "i");
+
+    // More flexible search - search in name, handle, and email
     const users = await User.find({
+      _id: { $ne: currentUserId }, // Exclude current user
       $or: [
-        { name: { $regex: query, $options: "i" } },
-        { handle: { $regex: query, $options: "i" } },
+        { name: searchPattern },
+        { handle: searchPattern },
+        { email: searchPattern },
       ],
     })
-      .select("name handle joinDate friends sentFriendRequests receivedFriendRequests")
-      .limit(20)
+      .select("name handle email joinDate friends sentFriendRequests receivedFriendRequests points")
+      .limit(50)
       .lean();
 
-    // Add friend status for each user
+    console.log(`✅ Found ${users.length} users for query "${cleanQuery}"`);
+    
+    if (users.length > 0) {
+      console.log(`📝 Sample result: ${users[0].name} (@${users[0].handle})`);
+    }
+
+    // Get current user for friend status
     const currentUser = await User.findById(currentUserId).lean();
 
+    if (!currentUser) {
+      console.error("❌ Current user not found:", currentUserId);
+      return res.status(401).json({ message: "User not authenticated" });
+    }
+
+    // Add friend status for each user
     const usersWithStatus = users.map((user) => {
       let friendStatus = "none";
 
@@ -498,7 +521,7 @@ export const searchUsers = async (req, res) => {
 
     res.status(200).json(usersWithStatus);
   } catch (error) {
-    console.error("Search users error:", error);
+    console.error("❌ Search users error:", error);
     res.status(500).json({ message: "Failed to search users" });
   }
 };
