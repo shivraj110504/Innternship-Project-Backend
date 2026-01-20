@@ -39,4 +39,23 @@ router.patch("/notifications/read", auth, markNotificationsRead);
 
 router.get("/search", auth, searchUsers);
 
+
+// Temporary notification endpoints
+router.get("/notifications", auth, async (req, res) => {
+  try {
+    // Return empty array for now
+    res.status(200).json([]);
+  } catch (error) {
+    res.status(500).json({ message: "Failed to fetch notifications" });
+  }
+});
+
+router.patch("/notifications/read", auth, async (req, res) => {
+  try {
+    res.status(200).json({ message: "Notifications marked as read" });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to mark notifications" });
+  }
+});
+
 export default router;

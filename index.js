@@ -27,7 +27,7 @@ app.use(cors({
 app.use(timeGate);
 
 app.get("/", (req, res) => {
-  res.send("Stackoverflow clone with Stripe subscriptions is running");
+  res.send("Stackoverflow clone with subscriptions is running");
 });
 
 app.get("/api/db-check", (req, res) => {
