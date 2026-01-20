@@ -1,3 +1,5 @@
+// sever/controller/auth.js
+
 import mongoose from "mongoose";
 import user from "../models/auth.js";
 import bcrypt from "bcryptjs";

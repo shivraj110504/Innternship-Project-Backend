@@ -1,133 +1,91 @@
-import mongoose from "mongoose";
 import question from "../models/question.js";
-import User from "../models/auth.js";
+import mongoose from "mongoose";
+import { incrementQuestionCount } from "./subscription.js";
 
-
-export const Askquestion = async (req, res) => {
-  const { postquestiondata } = req.body;
-  const userId = req.userid;
-
-  if (!userId) return res.status(403).json({ message: "Unauthenticated" });
+// Post a new question (with subscription check)
+export const askquestion = async (req, res) => {
+  const postquestiondata = req.body.postquestiondata;
+  const postquestion = new question(postquestiondata);
 
   try {
-    console.log(`[POST] Askquestion called with body:`, JSON.stringify(req.body, null, 2));
-
-    if (!postquestiondata) {
-      return res.status(400).json({ message: "Question data is missing" });
+    // Increment question count for subscription tracking
+    if (req.userid) {
+      await incrementQuestionCount(req.userid);
     }
 
-    const { questiontitle, questionbody, questiontags } = postquestiondata;
-    if (!questiontitle || !questionbody) {
-      return res.status(400).json({ message: "Title and body are required" });
-    }
-
-    const userData = await User.findById(userId);
-    if (!userData) {
-      console.error(`[POST] User not found: ${userId}`);
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    // Use 'friends' array (replaced followers/following)
-    const friendsCount = Array.isArray(userData.friends) ? userData.friends.length : 0;
-    console.log(`[POST] User ${userId} has ${friendsCount} friends. Friends array:`, userData.friends);
-
-    // Rule: if no friends, cannot post
-    if (friendsCount === 0) {
-      return res.status(403).json({ message: "You are not allowed to post. You need at least 1 friend to ask questions." });
-    }
-
-    // Rule: Posting limit logic based on friends count
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const questionsToday = await question.countDocuments({
-      userid: userId,
-      askedon: { $gte: today },
-    });
-
-    // 1 friend = 1 post/day, 2 friends = 2 posts/day, >10 friends = unlimited
-    if (friendsCount >= 1 && friendsCount <= 10) {
-      if (questionsToday >= friendsCount) {
-        return res.status(429).json({
-          message: `You can post only ${friendsCount} question${friendsCount > 1 ? "s" : ""} a day based on your friends count.`,
-        });
-      }
-    }
-    // If friendsCount > 10, no limit (multiple times)
-
-    const postques = new question({ ...postquestiondata, userid: userId });
-    await postques.save();
-    console.log(`[POST] Question created: ${postques._id}`);
-    res.status(200).json({ data: postques });
+    await postquestion.save();
+    res.status(200).json({ message: "Question posted successfully", data: postquestion });
   } catch (error) {
-    console.error("Ask question error:", error);
-    res.status(500).json({ message: error.message || "Something went wrong" });
-    return;
+    console.log(error);
+    res.status(409).json("Couldn't post a new Question");
   }
 };
 
-export const getallquestion = async (req, res) => {
+// Get all questions
+export const getallquestions = async (req, res) => {
   try {
-    const allquestion = await question.find().sort({ askedon: -1 });
-    res.status(200).json({ data: allquestion });
+    const questionlist = await question.find().sort({ askedon: -1 });
+    res.status(200).json(questionlist);
   } catch (error) {
-    res.status(500).json("something went wrong..");
-    return;
+    console.log(error);
+    res.status(404).json({ message: error.message });
   }
 };
+
+// Delete a question
 export const deletequestion = async (req, res) => {
   const { id: _id } = req.params;
-
   if (!mongoose.Types.ObjectId.isValid(_id)) {
-    return res.status(400).json({ message: "question unavailable" });
+    return res.status(400).json({ message: "Question unavailable" });
   }
   try {
     await question.findByIdAndDelete(_id);
-    res.status(200).json({ message: "question deleted" });
+    res.status(200).json({ message: "Question deleted successfully" });
   } catch (error) {
-    res.status(500).json("something went wrong..");
-    return;
+    console.log(error);
+    res.status(404).json({ message: error.message });
   }
 };
+
+// Vote on a question
 export const votequestion = async (req, res) => {
   const { id: _id } = req.params;
-  const { value, userid } = req.body;
+  const { value } = req.body;
+  const userid = req.userid;
+
   if (!mongoose.Types.ObjectId.isValid(_id)) {
-    return res.status(400).json({ message: "question unavailable" });
+    return res.status(400).json({ message: "Question unavailable" });
   }
+
   try {
-    const questionDoc = await question.findById(_id);
-    const upindex = questionDoc.upvote.findIndex((id) => id === String(userid));
-    const downindex = questionDoc.downvote.findIndex(
-      (id) => id === String(userid)
-    );
+    const ques = await question.findById(_id);
+    const upIndex = ques.upvote.findIndex((id) => id === String(userid));
+    const downIndex = ques.downvote.findIndex((id) => id === String(userid));
+
     if (value === "upvote") {
-      if (downindex !== -1) {
-        questionDoc.downvote = questionDoc.downvote.filter(
-          (id) => id !== String(userid)
-        );
+      if (downIndex !== -1) {
+        ques.downvote = ques.downvote.filter((id) => id !== String(userid));
       }
-      if (upindex === -1) {
-        questionDoc.upvote.push(userid);
+      if (upIndex === -1) {
+        ques.upvote.push(userid);
       } else {
-        questionDoc.upvote = questionDoc.upvote.filter((id) => id !== String(userid));
+        ques.upvote = ques.upvote.filter((id) => id !== String(userid));
       }
     } else if (value === "downvote") {
-      if (upindex !== -1) {
-        questionDoc.upvote = questionDoc.upvote.filter((id) => id !== String(userid));
+      if (upIndex !== -1) {
+        ques.upvote = ques.upvote.filter((id) => id !== String(userid));
       }
-      if (downindex === -1) {
-        questionDoc.downvote.push(userid);
+      if (downIndex === -1) {
+        ques.downvote.push(userid);
       } else {
-        questionDoc.downvote = questionDoc.downvote.filter(
-          (id) => id !== String(userid)
-        );
+        ques.downvote = ques.downvote.filter((id) => id !== String(userid));
       }
     }
-    const questionvote = await question.findByIdAndUpdate(_id, questionDoc, { new: true });
-    res.status(200).json({ data: questionvote });
+
+    await question.findByIdAndUpdate(_id, ques);
+    res.status(200).json({ message: "Voted successfully" });
   } catch (error) {
-    res.status(500).json("something went wrong..");
-    return;
+    console.log(error);
+    res.status(404).json({ message: "Error in voting" });
   }
 };
