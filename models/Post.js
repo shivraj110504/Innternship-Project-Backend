@@ -1,3 +1,5 @@
+// models/Post.ts
+
 import mongoose from "mongoose";
 
 const postSchema = mongoose.Schema({

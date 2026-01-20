@@ -1,356 +1,536 @@
+// Training/stackoverflow/server/controller/post.js
+
 import Post from "../models/Post.js";
 import User from "../models/auth.js";
 import Notification from "../models/Notification.js";
-import mongoose from "mongoose";
 
+// Create Post
 export const createPost = async (req, res) => {
+  try {
+    const userId = req.userid;
     const { mediaUrl, mediaType, caption } = req.body;
-    const userId = req.userid;
 
-    if (!userId) return res.status(403).json({ message: "Unauthenticated" });
-
-    try {
-        const user = await User.findById(userId);
-        if (!user) return res.status(404).json({ message: "User not found" });
-
-        const friendsCount = Array.isArray(user.friends) ? user.friends.length : 0;
-
-        // Rule: if no friends, cannot post
-        if (friendsCount === 0) {
-            return res.status(403).json({ message: "You cannot post anything on the public page until you have at least 1 friend." });
-        }
-
-        // Rule: Posting limit logic based on friends count
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        const postsToday = await Post.countDocuments({
-            userId,
-            createdAt: { $gte: today },
-        });
-
-        // 1 friend = 1 post, 2-10 friends = 2 posts
-        let limit = 0;
-        if (friendsCount === 1) limit = 1;
-        else if (friendsCount >= 2 && friendsCount <= 10) limit = 2;
-        else if (friendsCount > 10) limit = Infinity;
-
-        if (postsToday >= limit) {
-            return res.status(429).json({
-                message: `You can post only ${limit} time${limit > 1 ? "s" : ""} a day based on your friends count.`,
-            });
-        }
-
-        const newPost = await Post.create({
-            userId,
-            userName: user.name,
-            mediaUrl,
-            mediaType,
-            caption,
-        });
-
-        res.status(200).json(newPost);
-    } catch (error) {
-        res.status(500).json({ message: error.message });
+    // Get user details
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
     }
+
+    // Check friend count for posting rules
+    const friendsCount = user.friends?.length || 0;
+
+    if (friendsCount === 0) {
+      return res.status(403).json({
+        message: "You need at least 1 friend to post on the community page.",
+      });
+    }
+
+    // Check daily post limit based on friends
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const postsToday = await Post.countDocuments({
+      userId,
+      createdAt: { $gte: today },
+    });
+
+    let dailyLimit;
+    if (friendsCount >= 10) {
+      dailyLimit = Infinity; // Unlimited
+    } else {
+      dailyLimit = friendsCount; // 1-9 friends = same number of posts
+    }
+
+    if (postsToday >= dailyLimit && dailyLimit !== Infinity) {
+      return res.status(403).json({
+        message: `You can only post ${dailyLimit} time(s) per day with ${friendsCount} friend(s). Get 10+ friends for unlimited posts!`,
+        postsToday,
+        dailyLimit,
+      });
+    }
+
+    // Create the post
+    const newPost = await Post.create({
+      userId,
+      userName: user.name,
+      mediaUrl,
+      mediaType,
+      caption: caption || "",
+    });
+
+    res.status(201).json({
+      message: "Post created successfully",
+      post: newPost,
+      postsToday: postsToday + 1,
+      dailyLimit,
+    });
+  } catch (error) {
+    console.error("Create post error:", error);
+    res.status(500).json({ message: error.message || "Failed to create post" });
+  }
 };
 
-export const getallposts = async (req, res) => {
-    try {
-        const posts = await Post.find().sort({ createdAt: -1 });
-        res.status(200).json(posts);
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
+// Get all posts (public feed)
+export const getAllPosts = async (req, res) => {
+  try {
+    const posts = await Post.find()
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .populate("userId", "name handle")
+      .lean();
+
+    res.status(200).json(posts);
+  } catch (error) {
+    console.error("Get posts error:", error);
+    res.status(500).json({ message: "Failed to fetch posts" });
+  }
 };
 
-export const likePost = async (req, res) => {
+// Get single post
+export const getPost = async (req, res) => {
+  try {
     const { id } = req.params;
-    const userId = req.userid;
 
-    if (!userId) return res.status(403).json({ message: "Unauthenticated" });
+    const post = await Post.findById(id).populate("userId", "name handle");
 
-    try {
-        const post = await Post.findById(id);
-        const index = post.likes.findIndex((id) => id === String(userId));
-
-        if (index === -1) {
-            post.likes.push(userId);
-        } else {
-            post.likes = post.likes.filter((id) => id !== String(userId));
-        }
-
-        const updatedPost = await Post.findByIdAndUpdate(id, post, { new: true });
-        res.status(200).json(updatedPost);
-    } catch (error) {
-        res.status(500).json({ message: error.message });
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
     }
+
+    res.status(200).json(post);
+  } catch (error) {
+    console.error("Get post error:", error);
+    res.status(500).json({ message: "Failed to fetch post" });
+  }
 };
 
+// Like/Unlike post
+export const likePost = async (req, res) => {
+  try {
+    const userId = req.userid;
+    const { id } = req.params;
+
+    const post = await Post.findById(id);
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    const likes = post.likes || [];
+    const hasLiked = likes.includes(userId);
+
+    if (hasLiked) {
+      // Unlike
+      post.likes = likes.filter((id) => id !== userId);
+    } else {
+      // Like
+      post.likes.push(userId);
+
+      // Create notification for post owner
+      if (post.userId.toString() !== userId) {
+        await Notification.create({
+          userId: post.userId,
+          type: "LIKE",
+          message: `liked your post`,
+          fromUserId: userId,
+          relatedId: post._id,
+        });
+      }
+    }
+
+    await post.save();
+
+    res.status(200).json({
+      message: hasLiked ? "Post unliked" : "Post liked",
+      likes: post.likes,
+    });
+  } catch (error) {
+    console.error("Like post error:", error);
+    res.status(500).json({ message: "Failed to like post" });
+  }
+};
+
+// Comment on post
 export const commentPost = async (req, res) => {
+  try {
+    const userId = req.userid;
     const { id } = req.params;
     const { text } = req.body;
-    const userId = req.userid;
 
-    if (!userId) return res.status(403).json({ message: "Unauthenticated" });
-
-    try {
-        const user = await User.findById(userId);
-        const post = await Post.findById(id);
-
-        post.comments.push({
-            userId,
-            userName: user.name,
-            text,
-            createdAt: new Date(),
-        });
-
-        const updatedPost = await Post.findByIdAndUpdate(id, post, { new: true });
-        res.status(200).json(updatedPost);
-    } catch (error) {
-        res.status(500).json({ message: error.message });
+    if (!text || text.trim() === "") {
+      return res.status(400).json({ message: "Comment text is required" });
     }
+
+    const user = await User.findById(userId);
+    const post = await Post.findById(id);
+
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    const comment = {
+      userId,
+      userName: user.name,
+      text: text.trim(),
+      createdAt: new Date(),
+    };
+
+    post.comments.push(comment);
+    await post.save();
+
+    // Create notification for post owner
+    if (post.userId.toString() !== userId) {
+      await Notification.create({
+        userId: post.userId,
+        type: "COMMENT",
+        message: `commented on your post`,
+        fromUserId: userId,
+        relatedId: post._id,
+      });
+    }
+
+    res.status(200).json({
+      message: "Comment added",
+      comments: post.comments,
+    });
+  } catch (error) {
+    console.error("Comment post error:", error);
+    res.status(500).json({ message: "Failed to add comment" });
+  }
 };
 
-export const sendFriendRequest = async (req, res) => {
-    const { friendId } = req.body;
-    const userId = req.userid;
-
-    try {
-        const uId = new mongoose.Types.ObjectId(userId);
-        const fId = new mongoose.Types.ObjectId(friendId);
-
-        if (uId.equals(fId)) return res.status(400).json({ message: "You cannot add yourself as friend" });
-
-        const [user, targetUser] = await Promise.all([
-            User.findById(uId),
-            User.findById(fId)
-        ]);
-
-        if (!user || !targetUser) return res.status(404).json({ message: "User not found" });
-
-        const isAlreadyFriend = user.friends.some(id => id.toString() === fId.toString());
-        if (isAlreadyFriend) return res.status(400).json({ message: "Already friends" });
-
-        const isRequestAlreadySent = user.sentFriendRequests.some(id => id.toString() === fId.toString());
-        if (isRequestAlreadySent) return res.status(400).json({ message: "Request already sent" });
-
-        // Atomic update
-        await Promise.all([
-            User.findByIdAndUpdate(uId, { $addToSet: { sentFriendRequests: fId } }),
-            User.findByIdAndUpdate(fId, { $addToSet: { receivedFriendRequests: uId } })
-        ]);
-
-        await Notification.create({
-            recipient: fId,
-            sender: uId,
-            type: "FRIEND_REQUEST"
-        });
-
-        console.log(`[FRIEND] Request sent from ${uId} to ${fId}`);
-        res.status(200).json({ message: "Friend request sent" });
-    } catch (error) {
-        console.error("Send Friend Request Error:", error);
-        res.status(500).json({ message: error.message });
-    }
-};
-
-export const confirmFriendRequest = async (req, res) => {
-    const { friendId } = req.body;
-    const userId = req.userid;
-
-    try {
-        const uId = new mongoose.Types.ObjectId(userId);
-        const fId = new mongoose.Types.ObjectId(friendId);
-
-        // Atomic updates: remove from requests AND add to friends
-        const [updatedUser, updatedFriend] = await Promise.all([
-            User.findByIdAndUpdate(uId, {
-                $pull: { receivedFriendRequests: fId, sentFriendRequests: fId },
-                $addToSet: { friends: fId }
-            }, { new: true }),
-            User.findByIdAndUpdate(fId, {
-                $pull: { sentFriendRequests: uId, receivedFriendRequests: uId },
-                $addToSet: { friends: uId }
-            }, { new: true })
-        ]);
-
-        if (!updatedUser || !updatedFriend) return res.status(404).json({ message: "User not found" });
-
-        await Notification.create({
-            recipient: fId,
-            sender: uId,
-            type: "FRIEND_ACCEPT"
-        });
-
-        console.log(`[FRIEND] Request confirmed between ${uId} and ${fId}`);
-        res.status(200).json({ message: "Friend request confirmed" });
-    } catch (error) {
-        console.error("Confirm Friend Request Error:", error);
-        res.status(500).json({ message: error.message });
-    }
-};
-
-export const rejectFriendRequest = async (req, res) => {
-    const { friendId } = req.body;
-    const userId = req.userid;
-
-    try {
-        const uId = new mongoose.Types.ObjectId(userId);
-        const fId = new mongoose.Types.ObjectId(friendId);
-
-        await Promise.all([
-            User.findByIdAndUpdate(uId, { $pull: { receivedFriendRequests: fId } }),
-            User.findByIdAndUpdate(fId, { $pull: { sentFriendRequests: uId } })
-        ]);
-
-        await Notification.create({
-            recipient: fId,
-            sender: uId,
-            type: "FRIEND_REJECT"
-        });
-
-        console.log(`[FRIEND] Request rejected by ${uId} for ${fId}`);
-        res.status(200).json({ message: "Friend request rejected" });
-    } catch (error) {
-        console.error("Reject Friend Request Error:", error);
-        res.status(500).json({ message: error.message });
-    }
-};
-
-export const getFriends = async (req, res) => {
-    const userId = req.userid;
-    try {
-        if (!userId) return res.status(403).json({ message: "Unauthenticated" });
-        const userData = await User.findById(userId).populate("friends", "name email joinDate");
-        if (!userData) return res.status(404).json({ message: "User not found" });
-
-        // Ensure friends is an array before filtering
-        const friendsList = Array.isArray(userData.friends) ? userData.friends : [];
-        const activeFriends = friendsList.filter(f => f && f._id);
-
-        res.status(200).json(activeFriends);
-    } catch (error) {
-        console.error("getFriends Error:", error);
-        res.status(500).json({ message: error.message || "Failed to fetch friends" });
-    }
-};
-
-export const getFriendRequests = async (req, res) => {
-    const userId = req.userid;
-    try {
-        if (!userId) return res.status(403).json({ message: "Unauthenticated" });
-        const userData = await User.findById(userId).populate("receivedFriendRequests", "name email joinDate");
-        if (!userData) return res.status(404).json({ message: "User not found" });
-
-        const requestsList = Array.isArray(userData.receivedFriendRequests) ? userData.receivedFriendRequests : [];
-        const activeRequests = requestsList.filter(r => r && r._id);
-
-        res.status(200).json(activeRequests);
-    } catch (error) {
-        console.error("getFriendRequests Error:", error);
-        res.status(500).json({ message: error.message || "Failed to fetch friend requests" });
-    }
-};
-
-export const getNotifications = async (req, res) => {
-    const userId = req.userid;
-    try {
-        const notifications = await Notification.find({ recipient: userId })
-            .populate("sender", "name")
-            .sort({ createdAt: -1 });
-        res.status(200).json(notifications);
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-};
-
-export const markNotificationsRead = async (req, res) => {
-    const userId = req.userid;
-    try {
-        await Notification.updateMany({ recipient: userId, read: false }, { read: true });
-        res.status(200).json({ message: "Notifications marked as read" });
-    } catch (error) {
-        res.status(500).json({ message: error.message });
-    }
-};
-
-export const searchUsers = async (req, res) => {
-    const { query } = req.query;
-    if (!query) return res.status(200).json([]);
-
-    try {
-        const cleanQuery = query.replace(/^@/, "").trim();
-        const safeQuery = cleanQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(safeQuery, "i");
-
-        console.log(`[SEARCH] Query: "${query}" -> Regex: ${regex}`);
-
-        const results = await User.find({
-            $or: [
-                { name: { $regex: regex } },
-                { email: { $regex: regex } },
-                { handle: { $regex: regex } }
-            ]
-        }).select("name email handle friends sentFriendRequests receivedFriendRequests joinDate about tags points goldBadges silverBadges bronzeBadges").lean();
-
-        console.log(`[SEARCH] Found ${results.length} results`);
-
-        const myIdString = req.userid ? String(req.userid) : null;
-
-        const usersWithStatus = results.map(u => {
-            let status = "none";
-            return { ...u, friendStatus: status };
-        });
-
-        // If we want status, we DO need the 'me' document once.
-        if (myIdString && usersWithStatus.length > 0) {
-            const me = await User.findById(myIdString).lean();
-            if (me) {
-                usersWithStatus.forEach(tempUser => {
-                    const tid = String(tempUser._id);
-                    if (me.friends && me.friends.some(id => String(id) === tid)) {
-                        tempUser.friendStatus = "friends";
-                    } else if (me.sentFriendRequests && me.sentFriendRequests.some(id => String(id) === tid)) {
-                        tempUser.friendStatus = "request_sent";
-                    } else if (me.receivedFriendRequests && me.receivedFriendRequests.some(id => String(id) === tid)) {
-                        tempUser.friendStatus = "request_received";
-                    }
-                });
-            }
-        }
-
-        res.status(200).json(usersWithStatus);
-    } catch (error) {
-        console.error("searchUsers Error:", error);
-        res.status(500).json({ message: "Failed to search users" });
-    }
-};
-
-export const removeFriend = async (req, res) => {
-    const { friendId } = req.params;
-    const userId = req.userid;
-
-    try {
-        await Promise.all([
-            User.findByIdAndUpdate(userId, { $pull: { friends: friendId } }),
-            User.findByIdAndUpdate(friendId, { $pull: { friends: userId } })
-        ]);
-
-        console.log(`[FRIEND] Removed friend relationship between ${userId} and ${friendId}`);
-        res.status(200).json({ message: "Friend removed" });
-    } catch (error) {
-        console.error("Remove Friend Error:", error);
-        res.status(500).json({ message: error.message });
-    }
-};
-
+// Share post
 export const sharePost = async (req, res) => {
+  try {
     const { id } = req.params;
-    try {
-        const updatedPost = await Post.findByIdAndUpdate(id, { $inc: { shares: 1 } }, { new: true });
-        res.status(200).json(updatedPost);
-    } catch (error) {
-        res.status(500).json({ message: error.message });
+
+    const post = await Post.findById(id);
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
     }
+
+    post.shares = (post.shares || 0) + 1;
+    await post.save();
+
+    res.status(200).json({
+      message: "Post shared successfully",
+      shares: post.shares,
+    });
+  } catch (error) {
+    console.error("Share post error:", error);
+    res.status(500).json({ message: "Failed to share post" });
+  }
+};
+
+// Delete post
+export const deletePost = async (req, res) => {
+  try {
+    const userId = req.userid;
+    const { id } = req.params;
+
+    const post = await Post.findById(id);
+
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+
+    if (post.userId.toString() !== userId) {
+      return res.status(403).json({ message: "You can only delete your own posts" });
+    }
+
+    await Post.findByIdAndDelete(id);
+
+    res.status(200).json({ message: "Post deleted successfully" });
+  } catch (error) {
+    console.error("Delete post error:", error);
+    res.status(500).json({ message: "Failed to delete post" });
+  }
+};
+
+// Get user's posts
+export const getUserPosts = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const posts = await Post.find({ userId })
+      .sort({ createdAt: -1 })
+      .populate("userId", "name handle");
+
+    res.status(200).json(posts);
+  } catch (error) {
+    console.error("Get user posts error:", error);
+    res.status(500).json({ message: "Failed to fetch user posts" });
+  }
+};
+
+// Send friend request
+export const sendFriendRequest = async (req, res) => {
+  try {
+    const userId = req.userid;
+    const { friendId } = req.body;
+
+    if (userId === friendId) {
+      return res.status(400).json({ message: "You cannot send a friend request to yourself" });
+    }
+
+    const user = await User.findById(userId);
+    const friend = await User.findById(friendId);
+
+    if (!friend) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Check if already friends
+    if (user.friends?.includes(friendId)) {
+      return res.status(400).json({ message: "Already friends" });
+    }
+
+    // Check if request already sent
+    if (user.sentFriendRequests?.includes(friendId)) {
+      return res.status(400).json({ message: "Friend request already sent" });
+    }
+
+    // Check if friend request already received from this user
+    if (user.receivedFriendRequests?.includes(friendId)) {
+      return res.status(400).json({ message: "This user already sent you a request. Please confirm it instead." });
+    }
+
+    // Add to sent/received requests
+    user.sentFriendRequests = user.sentFriendRequests || [];
+    user.sentFriendRequests.push(friendId);
+
+    friend.receivedFriendRequests = friend.receivedFriendRequests || [];
+    friend.receivedFriendRequests.push(userId);
+
+    await user.save();
+    await friend.save();
+
+    // Create notification
+    await Notification.create({
+      userId: friendId,
+      type: "FRIEND_REQUEST",
+      message: `sent you a friend request`,
+      fromUserId: userId,
+    });
+
+    res.status(200).json({ message: "Friend request sent successfully" });
+  } catch (error) {
+    console.error("Send friend request error:", error);
+    res.status(500).json({ message: error.message || "Failed to send friend request" });
+  }
+};
+
+// Confirm friend request
+export const confirmFriendRequest = async (req, res) => {
+  try {
+    const userId = req.userid;
+    const { friendId } = req.body;
+
+    const user = await User.findById(userId);
+    const friend = await User.findById(friendId);
+
+    if (!friend) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Check if request exists
+    if (!user.receivedFriendRequests?.includes(friendId)) {
+      return res.status(400).json({ message: "No friend request from this user" });
+    }
+
+    // Remove from requests
+    user.receivedFriendRequests = user.receivedFriendRequests.filter(
+      (id) => id.toString() !== friendId
+    );
+    friend.sentFriendRequests = friend.sentFriendRequests.filter(
+      (id) => id.toString() !== userId
+    );
+
+    // Add to friends
+    user.friends = user.friends || [];
+    user.friends.push(friendId);
+
+    friend.friends = friend.friends || [];
+    friend.friends.push(userId);
+
+    await user.save();
+    await friend.save();
+
+    // Create notification
+    await Notification.create({
+      userId: friendId,
+      type: "FRIEND_ACCEPT",
+      message: `accepted your friend request`,
+      fromUserId: userId,
+    });
+
+    res.status(200).json({ message: "Friend request confirmed" });
+  } catch (error) {
+    console.error("Confirm friend request error:", error);
+    res.status(500).json({ message: "Failed to confirm friend request" });
+  }
+};
+
+// Reject friend request
+export const rejectFriendRequest = async (req, res) => {
+  try {
+    const userId = req.userid;
+    const { friendId } = req.body;
+
+    const user = await User.findById(userId);
+    const friend = await User.findById(friendId);
+
+    if (!friend) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Remove from requests
+    user.receivedFriendRequests = user.receivedFriendRequests.filter(
+      (id) => id.toString() !== friendId
+    );
+    friend.sentFriendRequests = friend.sentFriendRequests.filter(
+      (id) => id.toString() !== userId
+    );
+
+    await user.save();
+    await friend.save();
+
+    res.status(200).json({ message: "Friend request rejected" });
+  } catch (error) {
+    console.error("Reject friend request error:", error);
+    res.status(500).json({ message: "Failed to reject friend request" });
+  }
+};
+
+// Get friends list
+export const getFriends = async (req, res) => {
+  try {
+    const userId = req.userid;
+
+    const user = await User.findById(userId).populate("friends", "name handle joinDate");
+
+    res.status(200).json(user.friends || []);
+  } catch (error) {
+    console.error("Get friends error:", error);
+    res.status(500).json({ message: "Failed to fetch friends" });
+  }
+};
+
+// Get friend requests
+export const getFriendRequests = async (req, res) => {
+  try {
+    const userId = req.userid;
+
+    const user = await User.findById(userId).populate(
+      "receivedFriendRequests",
+      "name handle joinDate"
+    );
+
+    res.status(200).json(user.receivedFriendRequests || []);
+  } catch (error) {
+    console.error("Get friend requests error:", error);
+    res.status(500).json({ message: "Failed to fetch friend requests" });
+  }
+};
+
+// Remove friend
+export const removeFriend = async (req, res) => {
+  try {
+    const userId = req.userid;
+    const { friendId } = req.params;
+
+    const user = await User.findById(userId);
+    const friend = await User.findById(friendId);
+
+    if (!friend) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Remove from both friends lists
+    user.friends = user.friends.filter((id) => id.toString() !== friendId);
+    friend.friends = friend.friends.filter((id) => id.toString() !== userId);
+
+    await user.save();
+    await friend.save();
+
+    res.status(200).json({ message: "Friend removed successfully" });
+  } catch (error) {
+    console.error("Remove friend error:", error);
+    res.status(500).json({ message: "Failed to remove friend" });
+  }
+};
+
+// Search users
+export const searchUsers = async (req, res) => {
+  try {
+    const { query } = req.query;
+    const currentUserId = req.userid;
+
+    if (!query || query.trim() === "") {
+      return res.status(400).json({ message: "Search query is required" });
+    }
+
+    const users = await User.find({
+      $or: [
+        { name: { $regex: query, $options: "i" } },
+        { handle: { $regex: query, $options: "i" } },
+      ],
+    })
+      .select("name handle joinDate friends sentFriendRequests receivedFriendRequests")
+      .limit(20)
+      .lean();
+
+    // Add friend status for each user
+    const currentUser = await User.findById(currentUserId).lean();
+
+    const usersWithStatus = users.map((user) => {
+      let friendStatus = "none";
+
+      if (currentUser.friends?.some(id => id.toString() === user._id.toString())) {
+        friendStatus = "friends";
+      } else if (currentUser.sentFriendRequests?.some(id => id.toString() === user._id.toString())) {
+        friendStatus = "request_sent";
+      } else if (currentUser.receivedFriendRequests?.some(id => id.toString() === user._id.toString())) {
+        friendStatus = "request_received";
+      }
+
+      return { ...user, friendStatus };
+    });
+
+    res.status(200).json(usersWithStatus);
+  } catch (error) {
+    console.error("Search users error:", error);
+    res.status(500).json({ message: "Failed to search users" });
+  }
+};
+
+// Get notifications
+export const getNotifications = async (req, res) => {
+  try {
+    const userId = req.userid;
+
+    const notifications = await Notification.find({ userId })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .populate("fromUserId", "name handle")
+      .lean();
+
+    res.status(200).json(notifications);
+  } catch (error) {
+    console.error("Get notifications error:", error);
+    res.status(500).json({ message: "Failed to fetch notifications" });
+  }
+};
+
+// Mark notifications as read
+export const markNotificationsRead = async (req, res) => {
+  try {
+    const userId = req.userid;
+
+    await Notification.updateMany({ userId, read: false }, { read: true });
+
+    res.status(200).json({ message: "Notifications marked as read" });
+  } catch (error) {
+    console.error("Mark notifications read error:", error);
+    res.status(500).json({ message: "Failed to mark notifications as read" });
+  }
 };
