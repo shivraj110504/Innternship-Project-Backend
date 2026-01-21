@@ -16,7 +16,7 @@ import { sendFast2Sms } from "../utils/fast2sms.js";
 // ==========================================
 const setAuthCookie = (res, token) => {
   const isProduction = process.env.NODE_ENV === 'production';
-  const maxAge = 365 * 24 * 60 * 60 * 1000; // 1 year
+  const maxAge = 365 * 24 * 60 * 60 * 1000;
 
   res.cookie('token', token, {
     httpOnly: true,
@@ -39,7 +39,6 @@ export const awardBadges = async (userId) => {
     let silver = 0;
     let bronze = 0;
 
-    // Bronze: 10 pts, Silver: 50 pts, Gold: 100 pts
     if (points >= 100) gold = 1;
     if (points >= 50) silver = 1;
     if (points >= 10) bronze = 1;
@@ -94,7 +93,6 @@ const sendOtpEmail = async (email, otp) => {
   }
 };
 
-// Change password for authenticated user
 export const changePassword = async (req, res) => {
   try {
     const userId = req.userid;
@@ -123,7 +121,6 @@ export const changePassword = async (req, res) => {
   }
 };
 
-// Send reset OTP by phone directly
 export const forgotPasswordByPhone = async (req, res) => {
   const { phone } = req.body;
   if (!phone) return res.status(400).json({ message: "Phone number is required" });
@@ -158,7 +155,6 @@ export const forgotPasswordByPhone = async (req, res) => {
   }
 };
 
-// Transfer points between users
 export const transferPoints = async (req, res) => {
   const { fromUserId, toUserId, amount } = req.body;
   const amt = Number(amount);
@@ -190,7 +186,6 @@ export const transferPoints = async (req, res) => {
   }
 };
 
-// Helper to record login history
 const recordLoginHistory = async (req, userId, authMethod, status) => {
   const userAgent = req.headers["user-agent"] || "";
   const ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress || "127.0.0.1";
@@ -238,7 +233,6 @@ export const Signup = async (req, res) => {
       }
     }
 
-    // Generate unique handle if not provided
     if (!handle) {
       let baseHandle = name.toLowerCase().replace(/\s+/g, "");
       handle = baseHandle;
@@ -289,11 +283,14 @@ export const Signup = async (req, res) => {
 
     await recordLoginHistory(req, newuser._id, "PASSWORD", "SUCCESS");
 
-    // FIXED: Use helper function
     setAuthCookie(res, token);
 
     console.log("Signup successful for:", email);
-    res.status(200).json({ data: newuser });
+    // CRITICAL: Send token in response body for cross-origin support
+    res.status(200).json({ 
+      data: newuser,
+      token: token
+    });
   } catch (error) {
     console.error("Signup Error Detail:", error);
     res.status(500).json({ message: error.message || "Something went wrong during signup" });
@@ -361,10 +358,13 @@ export const Login = async (req, res) => {
 
     await recordLoginHistory(req, exisitinguser._id, isMicrosoft ? "NONE" : "PASSWORD", "SUCCESS");
 
-    // FIXED: Use helper function
     setAuthCookie(res, token);
 
-    res.status(200).json({ data: exisitinguser });
+    // CRITICAL: Send token in response body for cross-origin support
+    res.status(200).json({ 
+      data: exisitinguser,
+      token: token
+    });
   } catch (error) {
     console.error("Login Error:", error);
     res.status(500).json({ message: error.message || "Something went wrong during login" });
@@ -394,17 +394,19 @@ export const verifyOTP = async (req, res) => {
 
     await Otp.deleteOne({ _id: otpRecord._id });
 
-    // FIXED: Use helper function
     setAuthCookie(res, token);
 
-    res.status(200).json({ data: exisitinguser });
+    // CRITICAL: Send token in response body for cross-origin support
+    res.status(200).json({ 
+      data: exisitinguser,
+      token: token
+    });
   } catch (error) {
     res.status(500).json({ message: "OTP verification failed" });
   }
 };
 
 export const Logout = async (req, res) => {
-  // FIXED: Use clearCookie properly
   res.clearCookie('token', {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
