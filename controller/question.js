@@ -1,3 +1,5 @@
+// controller/question.js
+
 import question from "../models/question.js";
 import mongoose from "mongoose";
 import { incrementQuestionCount } from "./subscription.js";
@@ -17,18 +19,30 @@ export const askquestion = async (req, res) => {
     res.status(200).json({ message: "Question posted successfully", data: postquestion });
   } catch (error) {
     console.log(error);
-    res.status(409).json("Couldn't post a new Question");
+    res.status(409).json({ message: "Couldn't post a new Question" });
   }
 };
 
-// Get all questions
+// Get all questions - FIXED: Return consistent format
 export const getallquestions = async (req, res) => {
   try {
     const questionlist = await question.find().sort({ askedon: -1 });
-    res.status(200).json(questionlist);
+    
+    console.log(`📋 Fetched ${questionlist.length} questions`);
+    
+    // Return in consistent format with data wrapper
+    res.status(200).json({
+      success: true,
+      data: questionlist,
+      count: questionlist.length
+    });
   } catch (error) {
-    console.log(error);
-    res.status(404).json({ message: error.message });
+    console.error("❌ Error fetching questions:", error);
+    res.status(404).json({ 
+      success: false,
+      message: error.message,
+      data: [] // Always return empty array on error
+    });
   }
 };
 
@@ -59,6 +73,11 @@ export const votequestion = async (req, res) => {
 
   try {
     const ques = await question.findById(_id);
+    
+    if (!ques) {
+      return res.status(404).json({ message: "Question not found" });
+    }
+
     const upIndex = ques.upvote.findIndex((id) => id === String(userid));
     const downIndex = ques.downvote.findIndex((id) => id === String(userid));
 
@@ -83,9 +102,9 @@ export const votequestion = async (req, res) => {
     }
 
     await question.findByIdAndUpdate(_id, ques);
-    res.status(200).json({ message: "Voted successfully" });
+    res.status(200).json({ message: "Voted successfully", data: ques });
   } catch (error) {
     console.log(error);
     res.status(404).json({ message: "Error in voting" });
   }
-};
+}

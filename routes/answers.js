@@ -1,3 +1,5 @@
+// routes/answers.js
+
 import express from "express";
 import { Askanswer, deleteanswer, voteanswer } from "../controller/answer.js";
 

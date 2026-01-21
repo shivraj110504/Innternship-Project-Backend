@@ -1,3 +1,5 @@
+// routes/questions.js
+
 import express from "express";
 import { askquestion, getallquestions, deletequestion, votequestion } from "../controller/question.js";
 import auth from "../middleware/auth.js";
