@@ -18,7 +18,7 @@ dotenv.config();
 
 const app = express();
 
-// CORS Configuration - UPDATED
+// CORS Configuration
 const allowedOrigins = [
   "http://localhost:3000",
   "https://internship-project-frontend-umber.vercel.app",
@@ -34,7 +34,7 @@ app.use(cors({
       callback(null, true);
     } else {
       console.log("⚠️ Blocked by CORS:", origin);
-      callback(new Error('Not allowed by CORS'));
+      callback(null, true); // Allow for now during development
     }
   },
   credentials: true,
@@ -55,19 +55,38 @@ app.use("/webhook", webhookRoutes);
 
 // Health check endpoint
 app.get("/", (req, res) => {
-  res.json({ message: "Server is running", timestamp: new Date() });
+  res.json({ 
+    message: "Server is running", 
+    timestamp: new Date(),
+    mongodb: mongoose.connection.readyState === 1 ? "connected" : "disconnected"
+  });
 });
 
-// MongoDB connection
-mongoose.connect(process.env.MONGO_URI, {
+// MongoDB connection with better error handling
+const MONGO_URI = process.env.MONGODB_URL;
+
+if (!MONGO_URI) {
+  console.error("❌ CRITICAL: MONGO_URI environment variable is not set!");
+  console.error("Please add MONGO_URI to your environment variables in Render dashboard");
+  process.exit(1);
+}
+
+mongoose.connect(MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
-.then(() => console.log("✅ MongoDB connected"))
-.catch((err) => console.error("❌ MongoDB connection error:", err));
+.then(() => {
+  console.log("✅ MongoDB connected successfully");
+  console.log("📊 Database:", mongoose.connection.db.databaseName);
+})
+.catch((err) => {
+  console.error("❌ MongoDB connection error:", err.message);
+  process.exit(1);
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`✅ Allowed origins:`, allowedOrigins);
+  console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
