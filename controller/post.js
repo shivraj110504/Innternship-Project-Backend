@@ -459,7 +459,7 @@ export const removeFriend = async (req, res) => {
   }
 };
 
-// Search users
+// Search users - FIXED VERSION
 export const searchUsers = async (req, res) => {
   try {
     const { query } = req.query;
@@ -474,16 +474,16 @@ export const searchUsers = async (req, res) => {
 
     console.log(`🔍 Search request - Query: "${cleanQuery}", User: ${currentUserId}`);
 
-    // Create flexible search patterns
-    const searchPattern = new RegExp(cleanQuery, "i");
-
-    // More flexible search - search in name, handle, and email
+    // Create case-insensitive regex pattern for flexible matching
+    const searchPattern = new RegExp(cleanQuery.split('').join('.*'), "i");
+    
+    // More flexible search - search in name, handle, and email with partial matching
     const users = await User.find({
       _id: { $ne: currentUserId }, // Exclude current user
       $or: [
-        { name: searchPattern },
-        { handle: searchPattern },
-        { email: searchPattern },
+        { name: { $regex: cleanQuery, $options: "i" } }, // Case-insensitive name search
+        { handle: { $regex: cleanQuery, $options: "i" } }, // Case-insensitive handle search
+        { email: { $regex: cleanQuery, $options: "i" } }, // Case-insensitive email search
       ],
     })
       .select("name handle email joinDate friends sentFriendRequests receivedFriendRequests points")
@@ -493,7 +493,10 @@ export const searchUsers = async (req, res) => {
     console.log(`✅ Found ${users.length} users for query "${cleanQuery}"`);
     
     if (users.length > 0) {
-      console.log(`📝 Sample result: ${users[0].name} (@${users[0].handle})`);
+      console.log(`📝 Sample results:`);
+      users.slice(0, 3).forEach(u => {
+        console.log(`   - ${u.name} (@${u.handle || 'no-handle'}) [${u.email}]`);
+      });
     }
 
     // Get current user for friend status
