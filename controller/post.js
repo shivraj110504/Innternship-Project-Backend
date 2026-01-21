@@ -3,6 +3,7 @@
 import Post from "../models/Post.js";
 import User from "../models/auth.js";
 import Notification from "../models/Notification.js";
+import mongoose from "mongoose";
 
 // Create Post
 export const createPost = async (req, res) => {
@@ -262,35 +263,50 @@ export const getUserPosts = async (req, res) => {
   }
 };
 
-// Send friend request
+// Send friend request - FIXED
 export const sendFriendRequest = async (req, res) => {
   try {
     const userId = req.userid;
     const { friendId } = req.body;
 
+    console.log("🔔 Friend request received:", { userId, friendId });
+
+    if (!friendId) {
+      return res.status(400).json({ message: "Friend ID is required" });
+    }
+
     if (userId === friendId) {
       return res.status(400).json({ message: "You cannot send a friend request to yourself" });
     }
 
-    const user = await User.findById(userId);
-    const friend = await User.findById(friendId);
+    // Validate friendId is a valid ObjectId
+    if (!mongoose.Types.ObjectId.isValid(friendId)) {
+      return res.status(400).json({ message: "Invalid friend ID format" });
+    }
 
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Your user account not found" });
+    }
+
+    const friend = await User.findById(friendId);
     if (!friend) {
+      console.error("❌ Friend not found:", friendId);
       return res.status(404).json({ message: "User not found" });
     }
 
     // Check if already friends
-    if (user.friends?.includes(friendId)) {
+    if (user.friends?.some(id => id.toString() === friendId)) {
       return res.status(400).json({ message: "Already friends" });
     }
 
     // Check if request already sent
-    if (user.sentFriendRequests?.includes(friendId)) {
+    if (user.sentFriendRequests?.some(id => id.toString() === friendId)) {
       return res.status(400).json({ message: "Friend request already sent" });
     }
 
     // Check if friend request already received from this user
-    if (user.receivedFriendRequests?.includes(friendId)) {
+    if (user.receivedFriendRequests?.some(id => id.toString() === friendId)) {
       return res.status(400).json({ message: "This user already sent you a request. Please confirm it instead." });
     }
 
@@ -312,28 +328,44 @@ export const sendFriendRequest = async (req, res) => {
       fromUserId: userId,
     });
 
+    console.log("✅ Friend request sent successfully");
     res.status(200).json({ message: "Friend request sent successfully" });
   } catch (error) {
-    console.error("Send friend request error:", error);
+    console.error("❌ Send friend request error:", error);
     res.status(500).json({ message: error.message || "Failed to send friend request" });
   }
 };
 
-// Confirm friend request
+// Confirm friend request - FIXED
 export const confirmFriendRequest = async (req, res) => {
   try {
     const userId = req.userid;
     const { friendId } = req.body;
 
-    const user = await User.findById(userId);
-    const friend = await User.findById(friendId);
+    console.log("✅ Confirm request received:", { userId, friendId });
 
+    if (!friendId) {
+      return res.status(400).json({ message: "Friend ID is required" });
+    }
+
+    // Validate friendId is a valid ObjectId
+    if (!mongoose.Types.ObjectId.isValid(friendId)) {
+      return res.status(400).json({ message: "Invalid friend ID format" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Your user account not found" });
+    }
+
+    const friend = await User.findById(friendId);
     if (!friend) {
+      console.error("❌ Friend not found:", friendId);
       return res.status(404).json({ message: "User not found" });
     }
 
     // Check if request exists
-    if (!user.receivedFriendRequests?.includes(friendId)) {
+    if (!user.receivedFriendRequests?.some(id => id.toString() === friendId)) {
       return res.status(400).json({ message: "No friend request from this user" });
     }
 
@@ -363,23 +395,39 @@ export const confirmFriendRequest = async (req, res) => {
       fromUserId: userId,
     });
 
+    console.log("✅ Friend request confirmed successfully");
     res.status(200).json({ message: "Friend request confirmed" });
   } catch (error) {
-    console.error("Confirm friend request error:", error);
-    res.status(500).json({ message: "Failed to confirm friend request" });
+    console.error("❌ Confirm friend request error:", error);
+    res.status(500).json({ message: error.message || "Failed to confirm friend request" });
   }
 };
 
-// Reject friend request
+// Reject friend request - FIXED
 export const rejectFriendRequest = async (req, res) => {
   try {
     const userId = req.userid;
     const { friendId } = req.body;
 
-    const user = await User.findById(userId);
-    const friend = await User.findById(friendId);
+    console.log("❌ Reject request received:", { userId, friendId });
 
+    if (!friendId) {
+      return res.status(400).json({ message: "Friend ID is required" });
+    }
+
+    // Validate friendId is a valid ObjectId
+    if (!mongoose.Types.ObjectId.isValid(friendId)) {
+      return res.status(400).json({ message: "Invalid friend ID format" });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "Your user account not found" });
+    }
+
+    const friend = await User.findById(friendId);
     if (!friend) {
+      console.error("❌ Friend not found:", friendId);
       return res.status(404).json({ message: "User not found" });
     }
 
@@ -394,10 +442,11 @@ export const rejectFriendRequest = async (req, res) => {
     await user.save();
     await friend.save();
 
+    console.log("✅ Friend request rejected successfully");
     res.status(200).json({ message: "Friend request rejected" });
   } catch (error) {
-    console.error("Reject friend request error:", error);
-    res.status(500).json({ message: "Failed to reject friend request" });
+    console.error("❌ Reject friend request error:", error);
+    res.status(500).json({ message: error.message || "Failed to reject friend request" });
   }
 };
 
@@ -475,9 +524,6 @@ export const searchUsers = async (req, res) => {
     console.log(`🔍 Search request - Query: "${cleanQuery}", User: ${currentUserId}`);
 
     // Create case-insensitive regex pattern for flexible matching
-    const searchPattern = new RegExp(cleanQuery.split('').join('.*'), "i");
-    
-    // More flexible search - search in name, handle, and email with partial matching
     const users = await User.find({
       _id: { $ne: currentUserId }, // Exclude current user
       $or: [
