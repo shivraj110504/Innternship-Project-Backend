@@ -1,4 +1,4 @@
-// Training/stackoverflow/server/routes/posts.js
+// routes/posts.js
 
 import express from "express";
 import auth from "../middleware/auth.js";
@@ -11,6 +11,7 @@ import {
   sharePost,
   deletePost,
   getUserPosts,
+  getPostingStats,
   sendFriendRequest,
   confirmFriendRequest,
   rejectFriendRequest,
@@ -45,6 +46,7 @@ router.patch("/notifications/read", auth, markNotificationsRead);
 router.post("/create", auth, createPost);
 router.get("/getall", getAllPosts);
 router.get("/user/:userId", getUserPosts);
+router.get("/stats", auth, getPostingStats); // NEW: Get posting stats
 
 // Dynamic routes LAST (these will match anything)
 router.get("/:id", getPost);

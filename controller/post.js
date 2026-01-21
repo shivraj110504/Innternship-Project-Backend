@@ -1,11 +1,11 @@
-// Training/stackoverflow/server/controller/post.js
+// controller/post.js - UPDATED createPost function
 
 import Post from "../models/Post.js";
 import User from "../models/auth.js";
 import Notification from "../models/Notification.js";
 import mongoose from "mongoose";
 
-// Create Post
+// Create Post with friend-based posting limits
 export const createPost = async (req, res) => {
   try {
     const userId = req.userid;
@@ -20,9 +20,13 @@ export const createPost = async (req, res) => {
     // Check friend count for posting rules
     const friendsCount = user.friends?.length || 0;
 
+    // Rule 1: Need at least 1 friend to post
     if (friendsCount === 0) {
       return res.status(403).json({
         message: "You need at least 1 friend to post on the community page.",
+        friendsCount: 0,
+        postsToday: 0,
+        dailyLimit: 0,
       });
     }
 
@@ -35,18 +39,21 @@ export const createPost = async (req, res) => {
       createdAt: { $gte: today },
     });
 
+    // Rule 2: Determine daily limit based on friend count
     let dailyLimit;
     if (friendsCount >= 10) {
-      dailyLimit = Infinity; // Unlimited
+      dailyLimit = Infinity; // Unlimited posts
     } else {
-      dailyLimit = friendsCount; // 1-9 friends = same number of posts
+      dailyLimit = friendsCount; // 1-9 friends = same number of posts per day
     }
 
+    // Rule 3: Check if user has reached daily limit
     if (postsToday >= dailyLimit && dailyLimit !== Infinity) {
       return res.status(403).json({
         message: `You can only post ${dailyLimit} time(s) per day with ${friendsCount} friend(s). Get 10+ friends for unlimited posts!`,
         postsToday,
         dailyLimit,
+        friendsCount,
       });
     }
 
@@ -63,7 +70,8 @@ export const createPost = async (req, res) => {
       message: "Post created successfully",
       post: newPost,
       postsToday: postsToday + 1,
-      dailyLimit,
+      dailyLimit: dailyLimit === Infinity ? "Unlimited" : dailyLimit,
+      friendsCount,
     });
   } catch (error) {
     console.error("Create post error:", error);
@@ -263,7 +271,62 @@ export const getUserPosts = async (req, res) => {
   }
 };
 
-// Send friend request - FIXED
+// Get user's posting stats
+export const getPostingStats = async (req, res) => {
+  try {
+    const userId = req.userid;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const friendsCount = user.friends?.length || 0;
+
+    // Get today's post count
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const postsToday = await Post.countDocuments({
+      userId,
+      createdAt: { $gte: today },
+    });
+
+    // Determine daily limit
+    let dailyLimit;
+    if (friendsCount === 0) {
+      dailyLimit = 0;
+    } else if (friendsCount >= 10) {
+      dailyLimit = Infinity;
+    } else {
+      dailyLimit = friendsCount;
+    }
+
+    const canPost = friendsCount === 0 
+      ? false 
+      : (dailyLimit === Infinity || postsToday < dailyLimit);
+
+    res.status(200).json({
+      friendsCount,
+      postsToday,
+      dailyLimit: dailyLimit === Infinity ? "Unlimited" : dailyLimit,
+      remainingPosts: dailyLimit === Infinity 
+        ? "Unlimited" 
+        : Math.max(0, dailyLimit - postsToday),
+      canPost,
+      message: friendsCount === 0
+        ? "You need at least 1 friend to post"
+        : canPost
+        ? "You can create a post"
+        : `Daily limit reached (${dailyLimit} posts with ${friendsCount} friends)`,
+    });
+  } catch (error) {
+    console.error("Get posting stats error:", error);
+    res.status(500).json({ message: "Failed to fetch posting stats" });
+  }
+};
+
+// Send friend request - ALREADY EXISTS IN YOUR CODE
 export const sendFriendRequest = async (req, res) => {
   try {
     const userId = req.userid;
@@ -279,7 +342,6 @@ export const sendFriendRequest = async (req, res) => {
       return res.status(400).json({ message: "You cannot send a friend request to yourself" });
     }
 
-    // Validate friendId is a valid ObjectId
     if (!mongoose.Types.ObjectId.isValid(friendId)) {
       return res.status(400).json({ message: "Invalid friend ID format" });
     }
@@ -295,22 +357,18 @@ export const sendFriendRequest = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Check if already friends
     if (user.friends?.some(id => id.toString() === friendId)) {
       return res.status(400).json({ message: "Already friends" });
     }
 
-    // Check if request already sent
     if (user.sentFriendRequests?.some(id => id.toString() === friendId)) {
       return res.status(400).json({ message: "Friend request already sent" });
     }
 
-    // Check if friend request already received from this user
     if (user.receivedFriendRequests?.some(id => id.toString() === friendId)) {
       return res.status(400).json({ message: "This user already sent you a request. Please confirm it instead." });
     }
 
-    // Add to sent/received requests
     user.sentFriendRequests = user.sentFriendRequests || [];
     user.sentFriendRequests.push(friendId);
 
@@ -320,7 +378,6 @@ export const sendFriendRequest = async (req, res) => {
     await user.save();
     await friend.save();
 
-    // Create notification
     await Notification.create({
       userId: friendId,
       type: "FRIEND_REQUEST",
@@ -336,7 +393,7 @@ export const sendFriendRequest = async (req, res) => {
   }
 };
 
-// Confirm friend request - FIXED
+// Confirm friend request - ALREADY EXISTS IN YOUR CODE
 export const confirmFriendRequest = async (req, res) => {
   try {
     const userId = req.userid;
@@ -348,7 +405,6 @@ export const confirmFriendRequest = async (req, res) => {
       return res.status(400).json({ message: "Friend ID is required" });
     }
 
-    // Validate friendId is a valid ObjectId
     if (!mongoose.Types.ObjectId.isValid(friendId)) {
       return res.status(400).json({ message: "Invalid friend ID format" });
     }
@@ -364,12 +420,10 @@ export const confirmFriendRequest = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Check if request exists
     if (!user.receivedFriendRequests?.some(id => id.toString() === friendId)) {
       return res.status(400).json({ message: "No friend request from this user" });
     }
 
-    // Remove from requests
     user.receivedFriendRequests = user.receivedFriendRequests.filter(
       (id) => id.toString() !== friendId
     );
@@ -377,7 +431,6 @@ export const confirmFriendRequest = async (req, res) => {
       (id) => id.toString() !== userId
     );
 
-    // Add to friends
     user.friends = user.friends || [];
     user.friends.push(friendId);
 
@@ -387,7 +440,6 @@ export const confirmFriendRequest = async (req, res) => {
     await user.save();
     await friend.save();
 
-    // Create notification
     await Notification.create({
       userId: friendId,
       type: "FRIEND_ACCEPT",
@@ -403,7 +455,7 @@ export const confirmFriendRequest = async (req, res) => {
   }
 };
 
-// Reject friend request - FIXED
+// Reject friend request - ALREADY EXISTS IN YOUR CODE
 export const rejectFriendRequest = async (req, res) => {
   try {
     const userId = req.userid;
@@ -415,7 +467,6 @@ export const rejectFriendRequest = async (req, res) => {
       return res.status(400).json({ message: "Friend ID is required" });
     }
 
-    // Validate friendId is a valid ObjectId
     if (!mongoose.Types.ObjectId.isValid(friendId)) {
       return res.status(400).json({ message: "Invalid friend ID format" });
     }
@@ -431,7 +482,6 @@ export const rejectFriendRequest = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Remove from requests
     user.receivedFriendRequests = user.receivedFriendRequests.filter(
       (id) => id.toString() !== friendId
     );
@@ -494,7 +544,6 @@ export const removeFriend = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Remove from both friends lists
     user.friends = user.friends.filter((id) => id.toString() !== friendId);
     friend.friends = friend.friends.filter((id) => id.toString() !== userId);
 
@@ -508,7 +557,7 @@ export const removeFriend = async (req, res) => {
   }
 };
 
-// Search users - FIXED VERSION
+// Search users - ALREADY EXISTS IN YOUR CODE
 export const searchUsers = async (req, res) => {
   try {
     const { query } = req.query;
@@ -518,18 +567,16 @@ export const searchUsers = async (req, res) => {
       return res.status(400).json({ message: "Search query is required" });
     }
 
-    // Clean query - remove @ symbol if present and trim
     const cleanQuery = query.trim().replace(/^@/, "");
 
     console.log(`🔍 Search request - Query: "${cleanQuery}", User: ${currentUserId}`);
 
-    // Create case-insensitive regex pattern for flexible matching
     const users = await User.find({
-      _id: { $ne: currentUserId }, // Exclude current user
+      _id: { $ne: currentUserId },
       $or: [
-        { name: { $regex: cleanQuery, $options: "i" } }, // Case-insensitive name search
-        { handle: { $regex: cleanQuery, $options: "i" } }, // Case-insensitive handle search
-        { email: { $regex: cleanQuery, $options: "i" } }, // Case-insensitive email search
+        { name: { $regex: cleanQuery, $options: "i" } },
+        { handle: { $regex: cleanQuery, $options: "i" } },
+        { email: { $regex: cleanQuery, $options: "i" } },
       ],
     })
       .select("name handle email joinDate friends sentFriendRequests receivedFriendRequests points")
@@ -537,15 +584,7 @@ export const searchUsers = async (req, res) => {
       .lean();
 
     console.log(`✅ Found ${users.length} users for query "${cleanQuery}"`);
-    
-    if (users.length > 0) {
-      console.log(`📝 Sample results:`);
-      users.slice(0, 3).forEach(u => {
-        console.log(`   - ${u.name} (@${u.handle || 'no-handle'}) [${u.email}]`);
-      });
-    }
 
-    // Get current user for friend status
     const currentUser = await User.findById(currentUserId).lean();
 
     if (!currentUser) {
@@ -553,7 +592,6 @@ export const searchUsers = async (req, res) => {
       return res.status(401).json({ message: "User not authenticated" });
     }
 
-    // Add friend status for each user
     const usersWithStatus = users.map((user) => {
       let friendStatus = "none";
 
