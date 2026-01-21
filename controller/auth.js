@@ -1,5 +1,3 @@
-// server/controller/auth.js
-
 import mongoose from "mongoose";
 import user from "../models/auth.js";
 import bcrypt from "bcryptjs";
@@ -12,6 +10,24 @@ import Otp from "../models/Otp.js";
 import { generateRandomPassword } from "../utils/passwordUtils.js";
 import https from "https";
 import { sendFast2Sms } from "../utils/fast2sms.js";
+
+// ==========================================
+// HELPER FUNCTION FOR SETTING AUTH COOKIES
+// ==========================================
+const setAuthCookie = (res, token) => {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const maxAge = 365 * 24 * 60 * 60 * 1000; // 1 year
+
+  res.cookie('token', token, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'none' : 'lax',
+    maxAge: maxAge,
+    path: '/',
+  });
+
+  console.log(`✅ Cookie set: secure=${isProduction}, sameSite=${isProduction ? 'none' : 'lax'}`);
+};
 
 export const awardBadges = async (userId) => {
   try {
@@ -81,7 +97,7 @@ const sendOtpEmail = async (email, otp) => {
 // Change password for authenticated user
 export const changePassword = async (req, res) => {
   try {
-    const userId = req.userid; // set by auth middleware to req.userid
+    const userId = req.userid;
     const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword) {
       return res.status(400).json({ message: "Current and new password are required" });
@@ -164,7 +180,6 @@ export const transferPoints = async (req, res) => {
     await from.save();
     await to.save();
 
-    // Re-check badges for both after point changes
     await awardBadges(fromUserId);
     await awardBadges(toUserId);
 
@@ -212,7 +227,6 @@ export const Signup = async (req, res) => {
       return res.status(400).json({ message: "User already exist" });
     }
     
-    // normalize phone to digits only if provided
     if (phone) {
       phone = String(phone).replace(/\D/g, "");
       if (phone.length < 10) {
@@ -230,13 +244,11 @@ export const Signup = async (req, res) => {
       handle = baseHandle;
       let counter = 1;
       
-      // Check if handle exists, if so add number
       while (await user.findOne({ handle })) {
         handle = `${baseHandle}${counter}`;
         counter++;
       }
     } else {
-      // Verify provided handle is unique
       const handleExists = await user.findOne({ handle });
       if (handleExists) {
         return res.status(400).json({ message: "Handle already in use" });
@@ -254,7 +266,7 @@ export const Signup = async (req, res) => {
       name,
       email,
       password: hashpassword,
-      handle, // Always set handle
+      handle,
       ...(phone ? { phone } : {}),
       friends: [],
       sentFriendRequests: [],
@@ -275,11 +287,12 @@ export const Signup = async (req, res) => {
       { expiresIn: "36500d" }
     );
 
-    // Record signup as first login
     await recordLoginHistory(req, newuser._id, "PASSWORD", "SUCCESS");
 
+    // FIXED: Use helper function
+    setAuthCookie(res, token);
+
     console.log("Signup successful for:", email);
-    res.setHeader('Set-Cookie', `token=${token}; HttpOnly; Path=/; Max-Age=3153600000; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
     res.status(200).json({ data: newuser });
   } catch (error) {
     console.error("Signup Error Detail:", error);
@@ -306,7 +319,6 @@ export const Login = async (req, res) => {
       return res.status(400).json({ message: "Invalid password" });
     }
 
-    // 1. Time-gate for Mobile (10 AM - 1 PM IST)
     const nowIST = moment().tz("Asia/Kolkata");
     const hour = nowIST.hour();
     const isMobile = deviceType === "mobile" || deviceType === "tablet";
@@ -318,12 +330,10 @@ export const Login = async (req, res) => {
       });
     }
 
-    // 2. Browser Rules
     const isChrome = browserName.includes("CHROME");
     const isMicrosoft = browserName.includes("EDGE") || browserName.includes("IE");
 
     if (isChrome) {
-      // Generate OTP
       const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
       await Otp.create({
         userId: exisitinguser._id,
@@ -331,8 +341,6 @@ export const Login = async (req, res) => {
         email: exisitinguser.email,
       });
 
-      // FIRE AND FORGET: Email and History recording in background
-      // This ensures the user is redirected to the OTP screen INSTANTLY
       sendOtpEmail(exisitinguser.email, otpCode);
       recordLoginHistory(req, exisitinguser._id, "OTP", "PENDING_OTP");
 
@@ -345,7 +353,6 @@ export const Login = async (req, res) => {
       });
     }
 
-    // If Microsoft browser or others (defaulting to allow if not Chrome/Mobile block)
     const token = jwt.sign(
       { email: exisitinguser.email, id: exisitinguser._id },
       process.env.JWT_SECRET || "default_secret",
@@ -354,7 +361,9 @@ export const Login = async (req, res) => {
 
     await recordLoginHistory(req, exisitinguser._id, isMicrosoft ? "NONE" : "PASSWORD", "SUCCESS");
 
-    res.setHeader('Set-Cookie', `token=${token}; HttpOnly; Path=/; Max-Age=3153600000; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+    // FIXED: Use helper function
+    setAuthCookie(res, token);
+
     res.status(200).json({ data: exisitinguser });
   } catch (error) {
     console.error("Login Error:", error);
@@ -377,7 +386,6 @@ export const verifyOTP = async (req, res) => {
       { expiresIn: "36500d" }
     );
 
-    // Update login history to success
     await LoginHistory.findOneAndUpdate(
       { userId, status: "PENDING_OTP" },
       { status: "SUCCESS" },
@@ -386,7 +394,9 @@ export const verifyOTP = async (req, res) => {
 
     await Otp.deleteOne({ _id: otpRecord._id });
 
-    res.setHeader('Set-Cookie', `token=${token}; HttpOnly; Path=/; Max-Age=3153600000; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+    // FIXED: Use helper function
+    setAuthCookie(res, token);
+
     res.status(200).json({ data: exisitinguser });
   } catch (error) {
     res.status(500).json({ message: "OTP verification failed" });
@@ -394,7 +404,14 @@ export const verifyOTP = async (req, res) => {
 };
 
 export const Logout = async (req, res) => {
-  res.setHeader('Set-Cookie', 'token=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax');
+  // FIXED: Use clearCookie properly
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    path: '/',
+  });
+  
   res.status(200).json({ message: "Logged out successfully" });
 };
 
@@ -434,7 +451,6 @@ export const updateprofile = async (req, res) => {
       if (normalized && normalized.length < 10) {
         return res.status(400).json({ message: "Invalid phone number" });
       }
-      // ensure uniqueness excluding self
       if (normalized) {
         const other = await user.findOne({ phone: normalized, _id: { $ne: _id } });
         if (other) {
@@ -485,7 +501,6 @@ const fetchPhoneEmailUser = (userJsonUrl) => {
   });
 };
 
-// REMOVED as per request to use fast2sms only
 export const verifyPhoneEmail = async (req, res) => {
   return res.status(410).json({ message: "This verification method is deprecated. Please use OTP." });
 };
@@ -498,16 +513,9 @@ export const forgotPassword = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // If no phone is linked, we will only use Email-based OTP
     const hasPhone = !!existingUser.phone;
-
-    // Rate limiting: 1 time per day protection
-    // Check if user requested OTP recently to prevent spamming
-    // For now, allow retry for OTP, but update forgotPasswordAt only on successful reset.
-
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Create OTP record
     await Otp.create({
       userId: existingUser._id,
       otp: otpCode,
@@ -515,7 +523,6 @@ export const forgotPassword = async (req, res) => {
       ...(hasPhone ? { phone: existingUser.phone } : {})
     });
 
-    // Send SMS and Email
     try {
       if (hasPhone) {
         await sendFast2Sms({
@@ -523,13 +530,9 @@ export const forgotPassword = async (req, res) => {
           numbers: existingUser.phone
         });
       }
-      // 2. Send Email
       await sendOtpEmail(existingUser.email, otpCode);
-
     } catch (sendError) {
       console.error("OTP Send Error:", sendError);
-      // Even if one fails, the other might have worked. 
-      // User says "make sure ... work properly", so we try our best.
     }
 
     res.status(200).json({
@@ -544,14 +547,13 @@ export const forgotPassword = async (req, res) => {
 };
 
 export const resetPasswordWithOtp = async (req, res) => {
-  const { phone, otp } = req.body; // "user will enter mobile nubmer and otp also"
+  const { phone, otp } = req.body;
 
   if (!phone || !otp) {
     return res.status(400).json({ message: "Phone number and OTP are required" });
   }
 
   try {
-    // Verify OTP by phone OR email
     const otpRecord = phone
       ? await Otp.findOne({ phone, otp })
       : await Otp.findOne({ email: req.body.email, otp });
@@ -569,15 +571,13 @@ export const resetPasswordWithOtp = async (req, res) => {
       return res.status(400).json({ message: "Phone number does not match record" });
     }
 
-    // Generate new password
     const newPassword = generateRandomPassword(10);
     const hashpassword = await bcrypt.hash(newPassword, 12);
 
     existingUser.password = hashpassword;
-    existingUser.forgotPasswordAt = new Date(); // Update rate limit timestamp
+    existingUser.forgotPasswordAt = new Date();
     await existingUser.save();
 
-    // Delete used OTP
     await Otp.deleteOne({ _id: otpRecord._id });
 
     res.status(200).json({
