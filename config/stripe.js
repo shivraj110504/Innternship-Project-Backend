@@ -1,11 +1,9 @@
-// Training/stackoverflow/server/config/stripe.js
-
 import Stripe from "stripe";
+import dotenv from "dotenv";
 
-if (!process.env.STRIPE_SECRET_KEY) {
-  console.error("❌ STRIPE_SECRET_KEY is not set in environment variables");
-}
+dotenv.config();
 
+// Initialize Stripe
 export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2023-10-16",
 });
@@ -17,32 +15,60 @@ export const SUBSCRIPTION_PLANS = {
     price: 0,
     currency: "INR",
     dailyQuestionLimit: 1,
-    stripePriceId: null, // No Stripe price for free plan
+    stripePriceId: null,
   },
   BRONZE: {
     name: "Bronze Plan",
-    price: 10000, // ₹100.00 in paise
+    price: 10000, // ₹100 in paise (Stripe uses smallest currency unit)
     currency: "INR",
     dailyQuestionLimit: 5,
-    stripePriceId: null, // Will be set after creating in Stripe
+    stripePriceId: null,
   },
   SILVER: {
     name: "Silver Plan",
-    price: 30000, // ₹300.00 in paise
+    price: 30000, // ₹300 in paise
     currency: "INR",
     dailyQuestionLimit: 10,
-    stripePriceId: null, // Will be set after creating in Stripe
+    stripePriceId: null,
   },
   GOLD: {
     name: "Gold Plan",
-    price: 100000, // ₹1000.00 in paise
+    price: 100000, // ₹1000 in paise
     currency: "INR",
     dailyQuestionLimit: 999999, // Unlimited
-    stripePriceId: null, // Will be set after creating in Stripe
+    stripePriceId: null,
   },
 };
 
 // Helper function to get plan details
 export const getPlanDetails = (planName) => {
-  return SUBSCRIPTION_PLANS[planName] || SUBSCRIPTION_PLANS.FREE;
+  const plan = SUBSCRIPTION_PLANS[planName];
+  if (!plan) {
+    throw new Error(`Invalid plan: ${planName}`);
+  }
+  return plan;
 };
+
+// Helper function to format price
+export const formatPrice = (amount, currency = "INR") => {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: currency,
+  }).format(amount / 100);
+};
+
+// Validate Stripe configuration
+export const validateStripeConfig = () => {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    throw new Error("STRIPE_SECRET_KEY is not set in environment variables");
+  }
+  
+  if (!process.env.STRIPE_WEBHOOK_SECRET) {
+    console.warn("⚠️ STRIPE_WEBHOOK_SECRET is not set - webhooks will not work");
+  }
+  
+  console.log("✅ Stripe configuration validated");
+};
+
+// Call validation on import
+validateStripeConfig();

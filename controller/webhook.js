@@ -1,5 +1,3 @@
-// Training/stackoverflow/server/controller/webhook.js - PROPERLY FIXED
-
 import { stripe, getPlanDetails } from "../config/stripe.js";
 import Subscription from "../models/Subscription.js";
 import Payment from "../models/Payment.js";
@@ -13,15 +11,16 @@ export const handleStripeWebhook = async (req, res) => {
   let event;
 
   try {
+    // Verify webhook signature
     event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+    console.log("✅ Webhook verified:", event.type);
   } catch (err) {
     console.error("❌ Webhook signature verification failed:", err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  console.log(`📦 [WEBHOOK] Received event: ${event.type}`);
-
   try {
+    // Handle different event types
     switch (event.type) {
       case "checkout.session.completed":
         await handleCheckoutSessionCompleted(event.data.object);
@@ -44,281 +43,213 @@ export const handleStripeWebhook = async (req, res) => {
         break;
 
       default:
-        console.log(`⚠️ [WEBHOOK] Unhandled event type: ${event.type}`);
+        console.log(`⚠️ Unhandled event type: ${event.type}`);
     }
 
-    res.status(200).json({ received: true });
+    res.json({ received: true });
   } catch (error) {
-    console.error("❌ [WEBHOOK] Error processing webhook:", error);
-    res.status(500).json({ error: "Webhook processing failed" });
+    console.error("❌ Webhook handler error:", error);
+    res.status(500).json({ error: "Webhook handler failed" });
   }
 };
 
-// Handle successful checkout
+// Handle checkout session completed
 async function handleCheckoutSessionCompleted(session) {
+  console.log("🎉 Checkout session completed:", session.id);
+
+  const { customer, subscription: stripeSubId, metadata } = session;
+  const { userId, plan } = metadata;
+
+  if (!userId || !plan) {
+    console.error("❌ Missing userId or plan in metadata");
+    return;
+  }
+
   try {
-    const { customer, subscription: stripeSubscriptionId, metadata } = session;
-    const { userId, plan } = metadata;
-
-    console.log(`✅ [WEBHOOK] Checkout completed for user ${userId}, plan ${plan}`);
-
-    if (!stripeSubscriptionId) {
-      console.error("❌ [WEBHOOK] No subscription ID in checkout session");
-      return;
-    }
-
-    // Retrieve full subscription details from Stripe
-    const stripeSubscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+    // Get subscription details from Stripe
+    const stripeSubscription = await stripe.subscriptions.retrieve(stripeSubId);
     const planDetails = getPlanDetails(plan);
 
-    // Create or update subscription
-    const updatedSubscription = await Subscription.findOneAndUpdate(
-      { userId },
-      {
+    // Update or create subscription in database
+    let subscription = await Subscription.findOne({ userId });
+
+    if (subscription) {
+      // Update existing subscription
+      subscription.stripeCustomerId = customer;
+      subscription.stripeSubscriptionId = stripeSubId;
+      subscription.stripePriceId = stripeSubscription.items.data[0].price.id;
+      subscription.plan = plan;
+      subscription.status = "active";
+      subscription.currentPeriodStart = new Date(stripeSubscription.current_period_start * 1000);
+      subscription.currentPeriodEnd = new Date(stripeSubscription.current_period_end * 1000);
+      subscription.cancelAtPeriodEnd = false;
+      subscription.dailyQuestionLimit = planDetails.dailyQuestionLimit;
+      subscription.questionsAskedToday = 0;
+    } else {
+      // Create new subscription
+      subscription = new Subscription({
+        userId,
         stripeCustomerId: customer,
-        stripeSubscriptionId: stripeSubscriptionId,
+        stripeSubscriptionId: stripeSubId,
         stripePriceId: stripeSubscription.items.data[0].price.id,
-        plan: plan,
-        status: stripeSubscription.status,
+        plan,
+        status: "active",
         currentPeriodStart: new Date(stripeSubscription.current_period_start * 1000),
         currentPeriodEnd: new Date(stripeSubscription.current_period_end * 1000),
         dailyQuestionLimit: planDetails.dailyQuestionLimit,
         questionsAskedToday: 0,
-        cancelAtPeriodEnd: false,
-        updatedAt: new Date(),
-      },
-      { upsert: true, new: true }
-    );
+      });
+    }
 
-    console.log(`✅ [WEBHOOK] Subscription created/updated for user ${userId}`, {
-      subscriptionId: updatedSubscription._id,
-      plan: updatedSubscription.plan,
-      dailyLimit: updatedSubscription.dailyQuestionLimit
-    });
+    await subscription.save();
+    console.log("✅ Subscription saved:", subscription._id);
+
+    // Get user details for email
+    const user = await User.findById(userId);
+    if (user) {
+      console.log("📧 Sending confirmation email to:", user.email);
+    }
   } catch (error) {
-    console.error("❌ [WEBHOOK] Error in handleCheckoutSessionCompleted:", error);
-    throw error;
+    console.error("❌ Error handling checkout session:", error);
   }
 }
 
 // Handle successful invoice payment
 async function handleInvoicePaymentSucceeded(invoice) {
+  console.log("💰 Invoice payment succeeded:", invoice.id);
+
+  const { customer, subscription: stripeSubId, amount_paid, hosted_invoice_url } = invoice;
+
   try {
-    const { 
-      customer, 
-      subscription: stripeSubscriptionId, 
-      amount_paid, 
-      hosted_invoice_url,
-      payment_intent,
-      id: invoiceId,
-      created,
-      currency,
-      billing_reason
-    } = invoice;
+    // Find subscription by Stripe subscription ID
+    const subscription = await Subscription.findOne({ stripeSubscriptionId: stripeSubId });
 
-    console.log(`✅ [WEBHOOK] Invoice payment succeeded: ${invoiceId}`);
-
-    if (!stripeSubscriptionId) {
-      console.log("⚠️ [WEBHOOK] Invoice has no subscription (might be one-time payment)");
-      return;
-    }
-
-    // Find subscription
-    const subscription = await Subscription.findOne({ stripeSubscriptionId });
     if (!subscription) {
-      console.error("❌ [WEBHOOK] Subscription not found for invoice:", invoiceId);
+      console.error("❌ Subscription not found for invoice:", invoice.id);
       return;
     }
 
-    // Get user
-    const user = await User.findById(subscription.userId);
-    if (!user) {
-      console.error("❌ [WEBHOOK] User not found for subscription:", subscription._id);
+    // Check if payment already recorded
+    const existingPayment = await Payment.findOne({ stripeInvoiceId: invoice.id });
+    if (existingPayment) {
+      console.log("⚠️ Payment already recorded:", invoice.id);
       return;
     }
 
-    // Record payment
+    // Create payment record
     const payment = await Payment.create({
       userId: subscription.userId,
-      stripeInvoiceId: invoiceId,
-      stripePaymentIntentId: payment_intent,
+      stripePaymentIntentId: invoice.payment_intent,
+      stripeInvoiceId: invoice.id,
       amount: amount_paid,
-      currency: currency.toUpperCase(),
-      plan: subscription.plan,
+      currency: invoice.currency.toUpperCase(),
       status: "succeeded",
+      plan: subscription.plan,
+      paymentDate: new Date(invoice.created * 1000),
       invoiceUrl: hosted_invoice_url,
-      paymentDate: new Date(created * 1000),
+      metadata: {
+        subscriptionId: subscription._id,
+        stripeSubscriptionId: stripeSubId,
+      },
     });
 
-    console.log(`✅ [WEBHOOK] Payment recorded:`, {
-      paymentId: payment._id,
-      amount: amount_paid / 100,
-      currency: currency.toUpperCase()
-    });
+    console.log("✅ Payment recorded:", payment._id);
 
-    // Send invoice email
-    try {
-      await sendSubscriptionInvoiceEmail({
-        email: user.email,
-        userName: user.name,
-        plan: subscription.plan,
-        amount: (amount_paid / 100).toFixed(2), // Convert from cents
-        currency: currency.toUpperCase(),
-        invoiceUrl: hosted_invoice_url,
-        subscriptionId: stripeSubscriptionId,
-        currentPeriodEnd: subscription.currentPeriodEnd,
-        billingReason: billing_reason,
-      });
-      console.log(`✅ [WEBHOOK] Invoice email sent to ${user.email}`);
-    } catch (emailError) {
-      console.error("❌ [WEBHOOK] Failed to send invoice email:", emailError);
-      // Don't throw - payment is still successful
+    // Get user and send invoice email
+    const user = await User.findById(subscription.userId);
+    if (user && user.email) {
+      try {
+        await sendSubscriptionInvoiceEmail(
+          user.email,
+          user.name,
+          subscription.plan,
+          amount_paid / 100,
+          invoice.currency.toUpperCase(),
+          hosted_invoice_url
+        );
+        console.log("📧 Invoice email sent to:", user.email);
+      } catch (emailError) {
+        console.error("❌ Failed to send invoice email:", emailError);
+      }
     }
   } catch (error) {
-    console.error("❌ [WEBHOOK] Error in handleInvoicePaymentSucceeded:", error);
-    throw error;
+    console.error("❌ Error handling invoice payment:", error);
   }
 }
 
 // Handle failed invoice payment
 async function handleInvoicePaymentFailed(invoice) {
+  console.log("❌ Invoice payment failed:", invoice.id);
+
+  const { subscription: stripeSubId } = invoice;
+
   try {
-    const { 
-      subscription: stripeSubscriptionId,
-      id: invoiceId,
-      amount_due,
-      currency,
-      created
-    } = invoice;
+    const subscription = await Subscription.findOne({ stripeSubscriptionId: stripeSubId });
 
-    console.log(`❌ [WEBHOOK] Invoice payment failed: ${invoiceId}`);
-
-    if (!stripeSubscriptionId) {
-      console.log("⚠️ [WEBHOOK] Invoice has no subscription");
-      return;
-    }
-
-    const subscription = await Subscription.findOne({ stripeSubscriptionId });
-    
     if (subscription) {
-      // Update subscription status
       subscription.status = "past_due";
       await subscription.save();
-
-      console.log(`⚠️ [WEBHOOK] Subscription marked as past_due:`, subscription._id);
-
-      // Record failed payment
-      const payment = await Payment.create({
-        userId: subscription.userId,
-        stripeInvoiceId: invoiceId,
-        amount: amount_due,
-        currency: currency.toUpperCase(),
-        plan: subscription.plan,
-        status: "failed",
-        paymentDate: new Date(created * 1000),
-      });
-
-      console.log(`✅ [WEBHOOK] Failed payment recorded:`, payment._id);
-
-      // TODO: Send email notification to user about failed payment
-      const user = await User.findById(subscription.userId);
-      if (user && user.email) {
-        console.log(`📧 [WEBHOOK] Should send payment failed email to: ${user.email}`);
-        // Implement email notification here
-      }
-    } else {
-      console.error("❌ [WEBHOOK] Subscription not found for failed invoice");
+      console.log("⚠️ Subscription marked as past_due");
     }
+
+    // Record failed payment
+    await Payment.create({
+      userId: subscription.userId,
+      stripePaymentIntentId: invoice.payment_intent,
+      stripeInvoiceId: invoice.id,
+      amount: invoice.amount_due,
+      currency: invoice.currency.toUpperCase(),
+      status: "failed",
+      plan: subscription.plan,
+      paymentDate: new Date(),
+    });
   } catch (error) {
-    console.error("❌ [WEBHOOK] Error in handleInvoicePaymentFailed:", error);
-    throw error;
+    console.error("❌ Error handling failed payment:", error);
   }
 }
 
 // Handle subscription updates
 async function handleSubscriptionUpdated(stripeSubscription) {
-  try {
-    const { id, status, current_period_start, current_period_end, cancel_at_period_end } = stripeSubscription;
+  console.log("🔄 Subscription updated:", stripeSubscription.id);
 
-    console.log(`🔄 [WEBHOOK] Subscription updated: ${id}`, {
-      status,
-      cancelAtPeriodEnd: cancel_at_period_end
+  try {
+    const subscription = await Subscription.findOne({
+      stripeSubscriptionId: stripeSubscription.id,
     });
 
-    const updatedSubscription = await Subscription.findOneAndUpdate(
-      { stripeSubscriptionId: id },
-      {
-        status: status,
-        currentPeriodStart: new Date(current_period_start * 1000),
-        currentPeriodEnd: new Date(current_period_end * 1000),
-        cancelAtPeriodEnd: cancel_at_period_end,
-        updatedAt: new Date(),
-      },
-      { new: true }
-    );
+    if (subscription) {
+      subscription.status = stripeSubscription.status;
+      subscription.currentPeriodStart = new Date(stripeSubscription.current_period_start * 1000);
+      subscription.currentPeriodEnd = new Date(stripeSubscription.current_period_end * 1000);
+      subscription.cancelAtPeriodEnd = stripeSubscription.cancel_at_period_end;
 
-    if (updatedSubscription) {
-      console.log(`✅ [WEBHOOK] Subscription updated in database:`, {
-        subscriptionId: updatedSubscription._id,
-        userId: updatedSubscription.userId,
-        status: updatedSubscription.status
-      });
-    } else {
-      console.error("❌ [WEBHOOK] Subscription not found in database:", id);
+      await subscription.save();
+      console.log("✅ Subscription updated in database");
     }
   } catch (error) {
-    console.error("❌ [WEBHOOK] Error in handleSubscriptionUpdated:", error);
-    throw error;
+    console.error("❌ Error updating subscription:", error);
   }
 }
 
 // Handle subscription deletion
 async function handleSubscriptionDeleted(stripeSubscription) {
+  console.log("🗑️ Subscription deleted:", stripeSubscription.id);
+
   try {
-    const { id } = stripeSubscription;
-
-    console.log(`🗑️ [WEBHOOK] Subscription deleted: ${id}`);
-
     const subscription = await Subscription.findOne({
-      stripeSubscriptionId: id,
+      stripeSubscriptionId: stripeSubscription.id,
     });
 
     if (subscription) {
-      const previousPlan = subscription.plan;
-      
-      // Downgrade to FREE plan
-      subscription.plan = "FREE";
       subscription.status = "canceled";
+      subscription.plan = "FREE";
       subscription.dailyQuestionLimit = 1;
       subscription.questionsAskedToday = 0;
-      subscription.cancelAtPeriodEnd = false;
-      subscription.updatedAt = new Date();
-      
-      // Clear Stripe IDs since subscription is cancelled
-      subscription.stripeSubscriptionId = null;
-      subscription.stripePriceId = null;
-      // Keep stripeCustomerId for potential future upgrades
-      
+
       await subscription.save();
-
-      console.log(`✅ [WEBHOOK] Subscription downgraded to FREE:`, {
-        subscriptionId: subscription._id,
-        userId: subscription.userId,
-        previousPlan,
-        newPlan: subscription.plan
-      });
-
-      // TODO: Send email notification to user about subscription cancellation
-      const user = await User.findById(subscription.userId);
-      if (user && user.email) {
-        console.log(`📧 [WEBHOOK] Should send cancellation email to: ${user.email}`);
-        // Implement email notification here
-      }
-    } else {
-      console.error("❌ [WEBHOOK] Subscription not found in database:", id);
+      console.log("✅ Subscription downgraded to FREE");
     }
   } catch (error) {
-    console.error("❌ [WEBHOOK] Error in handleSubscriptionDeleted:", error);
-    throw error;
+    console.error("❌ Error handling subscription deletion:", error);
   }
 }
