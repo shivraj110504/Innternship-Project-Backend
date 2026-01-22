@@ -1,4 +1,4 @@
-// controller/post.js - UPDATED createPost function
+// Training/stackoverflow/server/controller/post.js - COMPLETE FILE
 
 import Post from "../models/Post.js";
 import User from "../models/auth.js";
@@ -11,16 +11,13 @@ export const createPost = async (req, res) => {
     const userId = req.userid;
     const { mediaUrl, mediaType, caption } = req.body;
 
-    // Get user details
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Check friend count for posting rules
     const friendsCount = user.friends?.length || 0;
 
-    // Rule 1: Need at least 1 friend to post
     if (friendsCount === 0) {
       return res.status(403).json({
         message: "You need at least 1 friend to post on the community page.",
@@ -30,7 +27,6 @@ export const createPost = async (req, res) => {
       });
     }
 
-    // Check daily post limit based on friends
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -39,15 +35,13 @@ export const createPost = async (req, res) => {
       createdAt: { $gte: today },
     });
 
-    // Rule 2: Determine daily limit based on friend count
     let dailyLimit;
     if (friendsCount >= 10) {
-      dailyLimit = Infinity; // Unlimited posts
+      dailyLimit = Infinity;
     } else {
-      dailyLimit = friendsCount; // 1-9 friends = same number of posts per day
+      dailyLimit = friendsCount;
     }
 
-    // Rule 3: Check if user has reached daily limit
     if (postsToday >= dailyLimit && dailyLimit !== Infinity) {
       return res.status(403).json({
         message: `You can only post ${dailyLimit} time(s) per day with ${friendsCount} friend(s). Get 10+ friends for unlimited posts!`,
@@ -57,7 +51,6 @@ export const createPost = async (req, res) => {
       });
     }
 
-    // Create the post
     const newPost = await Post.create({
       userId,
       userName: user.name,
@@ -113,18 +106,20 @@ export const getPost = async (req, res) => {
   }
 };
 
-// Like/Unlike post
+// Like/Unlike post - FIXED VERSION
 export const likePost = async (req, res) => {
   try {
     const userId = req.userid;
     const { id } = req.params;
 
-    const post = await Post.findById(id);
+    const post = await Post.findById(id).populate("userId", "name handle");
+    
     if (!post) {
       return res.status(404).json({ message: "Post not found" });
     }
 
-    const likes = post.likes || [];
+    // Ensure likes is an array
+    const likes = Array.isArray(post.likes) ? post.likes : [];
     const hasLiked = likes.includes(userId);
 
     if (hasLiked) {
@@ -135,22 +130,42 @@ export const likePost = async (req, res) => {
       post.likes.push(userId);
 
       // Create notification for post owner
-      if (post.userId.toString() !== userId) {
-        await Notification.create({
-          userId: post.userId,
-          type: "LIKE",
-          message: `liked your post`,
-          fromUserId: userId,
-          relatedId: post._id,
-        });
+      const postOwnerId = post.userId?._id || post.userId;
+      if (postOwnerId && postOwnerId.toString() !== userId) {
+        try {
+          await Notification.create({
+            userId: postOwnerId,
+            type: "LIKE",
+            message: `liked your post`,
+            fromUserId: userId,
+            relatedId: post._id,
+          });
+        } catch (notifError) {
+          console.error("Failed to create notification:", notifError);
+        }
       }
     }
 
     await post.save();
 
+    // Fetch the updated post with all fields
+    const updatedPost = await Post.findById(id)
+      .populate("userId", "name handle")
+      .lean();
+
+    // Ensure all required fields exist
+    const safePost = {
+      ...updatedPost,
+      likes: Array.isArray(updatedPost.likes) ? updatedPost.likes : [],
+      comments: Array.isArray(updatedPost.comments) ? updatedPost.comments : [],
+      shares: updatedPost.shares || 0,
+    };
+
     res.status(200).json({
       message: hasLiked ? "Post unliked" : "Post liked",
-      likes: post.likes,
+      post: safePost,
+      likes: safePost.likes,
+      likesCount: safePost.likes.length,
     });
   } catch (error) {
     console.error("Like post error:", error);
@@ -158,7 +173,7 @@ export const likePost = async (req, res) => {
   }
 };
 
-// Comment on post
+// Comment on post - FIXED VERSION
 export const commentPost = async (req, res) => {
   try {
     const userId = req.userid;
@@ -176,6 +191,11 @@ export const commentPost = async (req, res) => {
       return res.status(404).json({ message: "Post not found" });
     }
 
+    // Ensure comments array exists
+    if (!Array.isArray(post.comments)) {
+      post.comments = [];
+    }
+
     const comment = {
       userId,
       userName: user.name,
@@ -187,14 +207,19 @@ export const commentPost = async (req, res) => {
     await post.save();
 
     // Create notification for post owner
-    if (post.userId.toString() !== userId) {
-      await Notification.create({
-        userId: post.userId,
-        type: "COMMENT",
-        message: `commented on your post`,
-        fromUserId: userId,
-        relatedId: post._id,
-      });
+    const postOwnerId = post.userId?._id || post.userId;
+    if (postOwnerId && postOwnerId.toString() !== userId) {
+      try {
+        await Notification.create({
+          userId: postOwnerId,
+          type: "COMMENT",
+          message: `commented on your post`,
+          fromUserId: userId,
+          relatedId: post._id,
+        });
+      } catch (notifError) {
+        console.error("Failed to create notification:", notifError);
+      }
     }
 
     res.status(200).json({
@@ -283,7 +308,6 @@ export const getPostingStats = async (req, res) => {
 
     const friendsCount = user.friends?.length || 0;
 
-    // Get today's post count
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -292,7 +316,6 @@ export const getPostingStats = async (req, res) => {
       createdAt: { $gte: today },
     });
 
-    // Determine daily limit
     let dailyLimit;
     if (friendsCount === 0) {
       dailyLimit = 0;
@@ -326,7 +349,7 @@ export const getPostingStats = async (req, res) => {
   }
 };
 
-// Send friend request - ALREADY EXISTS IN YOUR CODE
+// Send friend request
 export const sendFriendRequest = async (req, res) => {
   try {
     const userId = req.userid;
@@ -393,7 +416,7 @@ export const sendFriendRequest = async (req, res) => {
   }
 };
 
-// Confirm friend request - ALREADY EXISTS IN YOUR CODE
+// Confirm friend request
 export const confirmFriendRequest = async (req, res) => {
   try {
     const userId = req.userid;
@@ -455,7 +478,7 @@ export const confirmFriendRequest = async (req, res) => {
   }
 };
 
-// Reject friend request - ALREADY EXISTS IN YOUR CODE
+// Reject friend request
 export const rejectFriendRequest = async (req, res) => {
   try {
     const userId = req.userid;
@@ -557,7 +580,7 @@ export const removeFriend = async (req, res) => {
   }
 };
 
-// Search users - ALREADY EXISTS IN YOUR CODE
+// Search users
 export const searchUsers = async (req, res) => {
   try {
     const { query } = req.query;
