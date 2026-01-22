@@ -1,3 +1,5 @@
+// server/models/Subscription.js - FIXED VERSION
+
 import mongoose from "mongoose";
 
 const subscriptionSchema = new mongoose.Schema({
@@ -6,9 +8,22 @@ const subscriptionSchema = new mongoose.Schema({
     ref: "User", 
     required: true 
   },
-  stripeCustomerId: { type: String, required: true },
-  stripeSubscriptionId: { type: String, required: true },
-  stripePriceId: { type: String, required: true },
+  // FIXED: Allow null for FREE plan users
+  stripeCustomerId: { 
+    type: String, 
+    required: false,
+    default: null 
+  },
+  stripeSubscriptionId: { 
+    type: String, 
+    required: false,
+    default: null 
+  },
+  stripePriceId: { 
+    type: String, 
+    required: false,
+    default: null 
+  },
   plan: { 
     type: String, 
     enum: ["FREE", "BRONZE", "SILVER", "GOLD"], 
@@ -32,6 +47,13 @@ const subscriptionSchema = new mongoose.Schema({
 // Index for efficient queries
 subscriptionSchema.index({ userId: 1 });
 subscriptionSchema.index({ stripeSubscriptionId: 1 });
+subscriptionSchema.index({ stripeCustomerId: 1 });
+
+// Update timestamp on save
+subscriptionSchema.pre('save', function(next) {
+  this.updatedAt = new Date();
+  next();
+});
 
 const Subscription = mongoose.model("Subscription", subscriptionSchema);
 export default Subscription;

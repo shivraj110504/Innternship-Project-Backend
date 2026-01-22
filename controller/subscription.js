@@ -1,3 +1,5 @@
+// server/controller/subscription.js - FIXED VERSION
+
 import { stripe, SUBSCRIPTION_PLANS, getPlanDetails } from "../config/stripe.js";
 import Subscription from "../models/Subscription.js";
 import Payment from "../models/Payment.js";
@@ -8,8 +10,10 @@ import moment from "moment-timezone";
 // Create Checkout Session for Subscription
 export const createCheckoutSession = async (req, res) => {
   try {
-    const userId = req.userid; // From auth middleware
+    const userId = req.userid;
     const { plan } = req.body;
+
+    console.log("📦 Create checkout session for user:", userId, "Plan:", plan);
 
     // Validate plan
     if (!["BRONZE", "SILVER", "GOLD"].includes(plan)) {
@@ -33,13 +37,14 @@ export const createCheckoutSession = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Check if user already has an active subscription
+    // Check if user already has an active subscription (excluding FREE)
     const existingSubscription = await Subscription.findOne({
       userId,
       status: "active",
+      plan: { $ne: "FREE" } // Exclude FREE plan
     });
 
-    if (existingSubscription && existingSubscription.plan !== "FREE") {
+    if (existingSubscription) {
       return res.status(400).json({
         message: "You already have an active subscription. Please cancel it first.",
       });
@@ -51,9 +56,13 @@ export const createCheckoutSession = async (req, res) => {
     let customerId;
     const existingSub = await Subscription.findOne({ userId });
     
-    if (existingSub && existingSub.stripeCustomerId) {
+    // FIXED: Only use existing customer ID if it's a real Stripe customer ID
+    if (existingSub && existingSub.stripeCustomerId && !existingSub.stripeCustomerId.startsWith('free_')) {
       customerId = existingSub.stripeCustomerId;
+      console.log("✅ Using existing customer:", customerId);
     } else {
+      // Create new Stripe customer
+      console.log("🆕 Creating new Stripe customer for:", user.email);
       const customer = await stripe.customers.create({
         email: user.email,
         name: user.name,
@@ -62,12 +71,14 @@ export const createCheckoutSession = async (req, res) => {
         },
       });
       customerId = customer.id;
+      console.log("✅ Created new customer:", customerId);
     }
 
     // Create or get Stripe Price
     let priceId = planDetails.stripePriceId;
     
     if (!priceId) {
+      console.log("🆕 Creating new product and price for plan:", plan);
       const product = await stripe.products.create({
         name: planDetails.name,
         description: `${planDetails.dailyQuestionLimit === 999999 ? 'Unlimited' : planDetails.dailyQuestionLimit} questions per day`,
@@ -82,6 +93,7 @@ export const createCheckoutSession = async (req, res) => {
 
       priceId = price.id;
       SUBSCRIPTION_PLANS[plan].stripePriceId = priceId;
+      console.log("✅ Created price:", priceId);
     }
 
     // Create Checkout Session
@@ -103,12 +115,14 @@ export const createCheckoutSession = async (req, res) => {
       },
     });
 
+    console.log("✅ Checkout session created:", session.id);
+
     res.status(200).json({
       sessionId: session.id,
       url: session.url,
     });
   } catch (error) {
-    console.error("Checkout Session Error:", error);
+    console.error("❌ Checkout Session Error:", error);
     res.status(500).json({ message: error.message || "Failed to create checkout session" });
   }
 };
@@ -124,20 +138,21 @@ export const getSubscription = async (req, res) => {
     if (!subscription) {
       subscription = await Subscription.create({
         userId,
-        stripeCustomerId: "free_user",
-        stripeSubscriptionId: "free_sub",
-        stripePriceId: "free_price",
+        stripeCustomerId: null, // FIXED: Don't use 'free_user'
+        stripeSubscriptionId: null, // FIXED: Don't use 'free_sub'
+        stripePriceId: null, // FIXED: Don't use 'free_price'
         plan: "FREE",
         status: "active",
         dailyQuestionLimit: 1,
         questionsAskedToday: 0,
         currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
       });
+      console.log("✅ Created FREE subscription for user:", userId);
     }
 
     res.status(200).json(subscription);
   } catch (error) {
-    console.error("Get Subscription Error:", error);
+    console.error("❌ Get Subscription Error:", error);
     res.status(500).json({ message: "Failed to fetch subscription" });
   }
 };
@@ -153,20 +168,24 @@ export const cancelSubscription = async (req, res) => {
       return res.status(400).json({ message: "No active subscription to cancel" });
     }
 
-    // Cancel at period end in Stripe
-    await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
-      cancel_at_period_end: true,
-    });
+    // Only cancel in Stripe if there's a valid subscription ID
+    if (subscription.stripeSubscriptionId && !subscription.stripeSubscriptionId.startsWith('free_')) {
+      await stripe.subscriptions.update(subscription.stripeSubscriptionId, {
+        cancel_at_period_end: true,
+      });
+    }
 
     subscription.cancelAtPeriodEnd = true;
     await subscription.save();
+
+    console.log("✅ Subscription marked for cancellation:", subscription._id);
 
     res.status(200).json({
       message: "Subscription will be cancelled at the end of billing period",
       subscription,
     });
   } catch (error) {
-    console.error("Cancel Subscription Error:", error);
+    console.error("❌ Cancel Subscription Error:", error);
     res.status(500).json({ message: "Failed to cancel subscription" });
   }
 };
@@ -176,14 +195,20 @@ export const checkQuestionLimit = async (req, res) => {
   try {
     const userId = req.userid;
 
-    const subscription = await Subscription.findOne({ userId });
+    let subscription = await Subscription.findOne({ userId });
 
+    // Create FREE subscription if doesn't exist
     if (!subscription) {
-      return res.status(200).json({
-        canAsk: true,
-        remaining: 1,
-        limit: 1,
+      subscription = await Subscription.create({
+        userId,
+        stripeCustomerId: null,
+        stripeSubscriptionId: null,
+        stripePriceId: null,
         plan: "FREE",
+        status: "active",
+        dailyQuestionLimit: 1,
+        questionsAskedToday: 0,
+        currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
       });
     }
 
@@ -199,17 +224,17 @@ export const checkQuestionLimit = async (req, res) => {
     }
 
     const remaining = subscription.dailyQuestionLimit - subscription.questionsAskedToday;
-    const canAsk = remaining > 0;
+    const canAsk = remaining > 0 || subscription.dailyQuestionLimit === 999999;
 
     res.status(200).json({
       canAsk,
-      remaining: Math.max(0, remaining),
-      limit: subscription.dailyQuestionLimit,
+      remaining: subscription.dailyQuestionLimit === 999999 ? "Unlimited" : Math.max(0, remaining),
+      limit: subscription.dailyQuestionLimit === 999999 ? "Unlimited" : subscription.dailyQuestionLimit,
       plan: subscription.plan,
       questionsAskedToday: subscription.questionsAskedToday,
     });
   } catch (error) {
-    console.error("Check Question Limit Error:", error);
+    console.error("❌ Check Question Limit Error:", error);
     res.status(500).json({ message: "Failed to check question limit" });
   }
 };
@@ -217,15 +242,15 @@ export const checkQuestionLimit = async (req, res) => {
 // Increment question count
 export const incrementQuestionCount = async (userId) => {
   try {
-    const subscription = await Subscription.findOne({ userId });
+    let subscription = await Subscription.findOne({ userId });
 
     if (!subscription) {
       // Create FREE subscription if not exists
-      await Subscription.create({
+      subscription = await Subscription.create({
         userId,
-        stripeCustomerId: "free_user",
-        stripeSubscriptionId: "free_sub",
-        stripePriceId: "free_price",
+        stripeCustomerId: null,
+        stripeSubscriptionId: null,
+        stripePriceId: null,
         plan: "FREE",
         status: "active",
         dailyQuestionLimit: 1,
@@ -250,7 +275,7 @@ export const incrementQuestionCount = async (userId) => {
     subscription.lastQuestionDate = new Date();
     await subscription.save();
   } catch (error) {
-    console.error("Increment Question Count Error:", error);
+    console.error("❌ Increment Question Count Error:", error);
   }
 };
 
@@ -265,7 +290,7 @@ export const getPaymentHistory = async (req, res) => {
 
     res.status(200).json(payments);
   } catch (error) {
-    console.error("Payment History Error:", error);
+    console.error("❌ Payment History Error:", error);
     res.status(500).json({ message: "Failed to fetch payment history" });
   }
 };
