@@ -72,8 +72,18 @@ const sendOtpEmail = async (email, otp) => {
     const response = await resend.emails.send({
       from: "StackOverflow <auth@shivrajtaware.in>",
       to: email,
-      subject: "Your Login OTP",
-      html: `<strong>Your OTP for login is: ${otp}</strong><br>It will expire in 5 minutes.`,
+      subject: "Your Password Reset OTP",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #333;">Password Reset Request</h2>
+          <p>Your OTP for password reset is:</p>
+          <div style="background: #f0f0f0; padding: 15px; text-align: center; margin: 20px 0;">
+            <h1 style="color: #4F46E5; letter-spacing: 5px; margin: 0;">${otp}</h1>
+          </div>
+          <p style="color: #666;">This OTP will expire in 5 minutes.</p>
+          <p style="color: #666;">If you didn't request this, please ignore this email.</p>
+        </div>
+      `,
     });
 
     if (response.error) {
@@ -83,13 +93,15 @@ const sendOtpEmail = async (email, otp) => {
       if (response.error.name === "validation_error" && response.error.message.includes("to authorized email")) {
         console.warn("[RESEND] TIP: When using a new Resend account, you can ONLY send emails to yourself (your signup email). To send to others, you must verify a domain.");
       }
-      return;
+      return false;
     }
 
     console.log("[RESEND] Success! Message ID:", response.data.id);
+    return true;
   } catch (err) {
     console.error("[RESEND] Unexpected system error:", err);
     console.log("[DEBUG] OTP Code for manual login:", otp);
+    return false;
   }
 };
 
@@ -124,10 +136,26 @@ export const changePassword = async (req, res) => {
 export const forgotPasswordByPhone = async (req, res) => {
   const { phone } = req.body;
   if (!phone) return res.status(400).json({ message: "Phone number is required" });
+  
   try {
     const existingUser = await user.findOne({ phone });
     if (!existingUser) {
       return res.status(404).json({ message: "User with this phone not found" });
+    }
+
+    // Check daily limit
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    if (existingUser.forgotPasswordAt) {
+      const lastReset = new Date(existingUser.forgotPasswordAt);
+      lastReset.setHours(0, 0, 0, 0);
+      
+      if (lastReset.getTime() === today.getTime()) {
+        return res.status(429).json({ 
+          message: "You can only request password reset once per day. Please try again tomorrow." 
+        });
+      }
     }
 
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -140,15 +168,19 @@ export const forgotPasswordByPhone = async (req, res) => {
 
     try {
       await sendFast2Sms({
-        message: `Your OTP for password reset is ${otpCode}.`,
+        message: `Your OTP for password reset is ${otpCode}. Valid for 5 minutes.`,
         numbers: existingUser.phone,
       });
+      console.log(`[SMS] OTP sent to ${existingUser.phone}: ${otpCode}`);
     } catch (smsError) {
       console.error("Fast2SMS Error:", smsError);
       return res.status(500).json({ message: "Failed to send SMS OTP. Please try again later." });
     }
 
-    res.status(200).json({ message: "OTP sent to your mobile number." });
+    res.status(200).json({ 
+      message: "OTP sent to your mobile number.",
+      phone: existingUser.phone 
+    });
   } catch (error) {
     console.error("Forgot Password (phone) Error:", error);
     res.status(500).json({ message: "Something went wrong" });
@@ -286,7 +318,6 @@ export const Signup = async (req, res) => {
     setAuthCookie(res, token);
 
     console.log("Signup successful for:", email);
-    // CRITICAL: Send token in response body for cross-origin support
     res.status(200).json({ 
       data: newuser,
       token: token
@@ -360,7 +391,6 @@ export const Login = async (req, res) => {
 
     setAuthCookie(res, token);
 
-    // CRITICAL: Send token in response body for cross-origin support
     res.status(200).json({ 
       data: exisitinguser,
       token: token
@@ -396,7 +426,6 @@ export const verifyOTP = async (req, res) => {
 
     setAuthCookie(res, token);
 
-    // CRITICAL: Send token in response body for cross-origin support
     res.status(200).json({ 
       data: exisitinguser,
       token: token
@@ -483,41 +512,43 @@ export const getUser = async (req, res) => {
   }
 };
 
-const fetchPhoneEmailUser = (userJsonUrl) => {
-  return new Promise((resolve, reject) => {
-    https.get(userJsonUrl, (res) => {
-      let data = "";
-
-      res.on("data", (chunk) => {
-        data += chunk;
-      });
-
-      res.on("end", () => {
-        try {
-          resolve(JSON.parse(data));
-        } catch (err) {
-          reject(err);
-        }
-      });
-    }).on("error", reject);
-  });
-};
-
 export const verifyPhoneEmail = async (req, res) => {
   return res.status(410).json({ message: "This verification method is deprecated. Please use OTP." });
 };
 
+// UPDATED: Forgot Password - Send OTP to BOTH email and phone
 export const forgotPassword = async (req, res) => {
   const { email } = req.body;
+  
+  if (!email) {
+    return res.status(400).json({ message: "Email is required" });
+  }
+
   try {
     const existingUser = await user.findOne({ email });
     if (!existingUser) {
       return res.status(404).json({ message: "User not found" });
     }
 
+    // Check daily limit
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    if (existingUser.forgotPasswordAt) {
+      const lastReset = new Date(existingUser.forgotPasswordAt);
+      lastReset.setHours(0, 0, 0, 0);
+      
+      if (lastReset.getTime() === today.getTime()) {
+        return res.status(429).json({ 
+          message: "You can only request password reset once per day. Please try again tomorrow." 
+        });
+      }
+    }
+
     const hasPhone = !!existingUser.phone;
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
+    // Save OTP to database
     await Otp.create({
       userId: existingUser._id,
       otp: otpCode,
@@ -525,21 +556,48 @@ export const forgotPassword = async (req, res) => {
       ...(hasPhone ? { phone: existingUser.phone } : {})
     });
 
+    let emailSent = false;
+    let smsSent = false;
+
+    // Send OTP via EMAIL
     try {
-      if (hasPhone) {
+      emailSent = await sendOtpEmail(existingUser.email, otpCode);
+      console.log(`[EMAIL] OTP sent to ${existingUser.email}: ${otpCode}`);
+    } catch (emailError) {
+      console.error("Email OTP Send Error:", emailError);
+    }
+
+    // Send OTP via SMS (if phone exists)
+    if (hasPhone) {
+      try {
         await sendFast2Sms({
-          message: `Your OTP for password reset is ${otpCode}.`,
+          message: `Your OTP for password reset is ${otpCode}. Valid for 5 minutes.`,
           numbers: existingUser.phone
         });
+        smsSent = true;
+        console.log(`[SMS] OTP sent to ${existingUser.phone}: ${otpCode}`);
+      } catch (smsError) {
+        console.error("SMS OTP Send Error:", smsError);
       }
-      await sendOtpEmail(existingUser.email, otpCode);
-    } catch (sendError) {
-      console.error("OTP Send Error:", sendError);
+    }
+
+    // Provide appropriate response based on what was sent
+    let message = "";
+    if (emailSent && smsSent) {
+      message = "OTP sent to your registered email and mobile number.";
+    } else if (emailSent) {
+      message = "OTP sent to your registered email.";
+    } else if (smsSent) {
+      message = "OTP sent to your registered mobile number.";
+    } else {
+      message = "OTP generated. Check server logs for the code.";
     }
 
     res.status(200).json({
-      message: "OTP sent to your registered mobile and email.",
-      phone: existingUser.phone
+      message,
+      hasPhone,
+      phone: hasPhone ? existingUser.phone : null,
+      email: existingUser.email
     });
 
   } catch (error) {
@@ -548,17 +606,19 @@ export const forgotPassword = async (req, res) => {
   }
 };
 
+// UPDATED: Reset Password with OTP - Generate random password (letters only)
 export const resetPasswordWithOtp = async (req, res) => {
-  const { phone, otp } = req.body;
+  const { phone, otp, email } = req.body;
 
-  if (!phone || !otp) {
-    return res.status(400).json({ message: "Phone number and OTP are required" });
+  if ((!phone && !email) || !otp) {
+    return res.status(400).json({ message: "Phone/Email and OTP are required" });
   }
 
   try {
+    // Find OTP record by phone or email
     const otpRecord = phone
       ? await Otp.findOne({ phone, otp })
-      : await Otp.findOne({ email: req.body.email, otp });
+      : await Otp.findOne({ email, otp });
 
     if (!otpRecord) {
       return res.status(400).json({ message: "Invalid or expired OTP" });
@@ -569,17 +629,23 @@ export const resetPasswordWithOtp = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    if (existingUser.phone !== phone) {
+    // Verify phone/email match
+    if (phone && existingUser.phone !== phone) {
       return res.status(400).json({ message: "Phone number does not match record" });
     }
+    if (email && existingUser.email !== email) {
+      return res.status(400).json({ message: "Email does not match record" });
+    }
 
+    // Generate random password (letters only, mixed case, no numbers/special chars)
     const newPassword = generateRandomPassword(10);
     const hashpassword = await bcrypt.hash(newPassword, 12);
 
     existingUser.password = hashpassword;
-    existingUser.forgotPasswordAt = new Date();
+    existingUser.forgotPasswordAt = new Date(); // Update daily limit timestamp
     await existingUser.save();
 
+    // Delete used OTP
     await Otp.deleteOne({ _id: otpRecord._id });
 
     res.status(200).json({

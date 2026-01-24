@@ -121,24 +121,121 @@ export const sendSubscriptionInvoiceEmail = async (
   }
 };
 
-// Send OTP email
-export const sendOTPEmail = async (to, otp, userName) => {
+// Send OTP email for password reset
+export const sendPasswordResetOTPEmail = async (to, otp, userName) => {
   try {
     const transporter = createTransporter();
     
     if (!transporter) {
-      console.log("📧 OTP would be sent to:", to, "OTP:", otp);
+      console.log("📧 Password Reset OTP would be sent to:", to, "OTP:", otp);
       return { success: true, message: "Email service not configured - logged only" };
     }
 
     const mailOptions = {
       from: `"StackOverflow Clone" <${process.env.EMAIL_USER}>`,
       to,
-      subject: "Your OTP for Login",
+      subject: "Password Reset - Your OTP Code",
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: #4F46E5; color: white; padding: 20px; text-align: center; }
+            .content { background: #f9f9f9; padding: 30px; margin-top: 20px; border-radius: 8px; }
+            .otp-box { 
+              background: white; 
+              padding: 20px; 
+              margin: 20px 0; 
+              text-align: center;
+              border: 2px dashed #4F46E5;
+              border-radius: 8px;
+            }
+            .otp-code {
+              font-size: 32px;
+              font-weight: bold;
+              color: #4F46E5;
+              letter-spacing: 8px;
+              margin: 10px 0;
+            }
+            .warning { 
+              background: #FEF3C7; 
+              border-left: 4px solid #F59E0B;
+              padding: 12px;
+              margin: 20px 0;
+            }
+            .footer { text-align: center; margin-top: 30px; color: #666; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🔐 Password Reset Request</h1>
+            </div>
+            
+            <div class="content">
+              <p>Hi ${userName || 'User'},</p>
+              
+              <p>We received a request to reset your password. Use the OTP code below to complete the process:</p>
+              
+              <div class="otp-box">
+                <p style="margin: 0; color: #666; font-size: 14px;">Your OTP Code</p>
+                <div class="otp-code">${otp}</div>
+                <p style="margin: 0; color: #666; font-size: 12px;">Valid for 5 minutes</p>
+              </div>
+              
+              <div class="warning">
+                <strong>⚠️ Security Notice:</strong>
+                <ul style="margin: 5px 0;">
+                  <li>This OTP will expire in 5 minutes</li>
+                  <li>Never share this code with anyone</li>
+                  <li>You can only request password reset once per day</li>
+                </ul>
+              </div>
+              
+              <p>If you didn't request this password reset, please ignore this email and your password will remain unchanged.</p>
+              
+              <p>Best regards,<br>The StackOverflow Clone Team</p>
+            </div>
+            
+            <div class="footer">
+              <p>This is an automated email. Please do not reply to this message.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log("✅ Password Reset OTP email sent:", info.messageId);
+    
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error("❌ Error sending password reset OTP email:", error);
+    return { success: false, error: error.message };
+  }
+};
+
+// Send OTP email for login
+export const sendOTPEmail = async (to, otp, userName) => {
+  try {
+    const transporter = createTransporter();
+    
+    if (!transporter) {
+      console.log("📧 Login OTP would be sent to:", to, "OTP:", otp);
+      return { success: true, message: "Email service not configured - logged only" };
+    }
+
+    const mailOptions = {
+      from: `"StackOverflow Clone" <${process.env.EMAIL_USER}>`,
+      to,
+      subject: "Your Login OTP Code",
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2>Login OTP</h2>
-          <p>Hi ${userName},</p>
+          <p>Hi ${userName || 'User'},</p>
           <p>Your OTP for login is:</p>
           <h1 style="background: #4F46E5; color: white; padding: 20px; text-align: center; letter-spacing: 5px;">${otp}</h1>
           <p>This OTP will expire in 10 minutes.</p>
@@ -148,7 +245,7 @@ export const sendOTPEmail = async (to, otp, userName) => {
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log("✅ OTP email sent:", info.messageId);
+    console.log("✅ Login OTP email sent:", info.messageId);
     
     return { success: true, messageId: info.messageId };
   } catch (error) {
@@ -159,5 +256,6 @@ export const sendOTPEmail = async (to, otp, userName) => {
 
 export default {
   sendSubscriptionInvoiceEmail,
+  sendPasswordResetOTPEmail,
   sendOTPEmail,
 };
