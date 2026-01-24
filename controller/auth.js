@@ -516,7 +516,7 @@ export const verifyPhoneEmail = async (req, res) => {
   return res.status(410).json({ message: "This verification method is deprecated. Please use OTP." });
 };
 
-// UPDATED: Forgot Password - Send OTP to BOTH email and phone
+// UPDATED: Forgot Password - Send OTP to EMAIL only (user chose email method)
 export const forgotPassword = async (req, res) => {
   const { email } = req.body;
   
@@ -545,7 +545,6 @@ export const forgotPassword = async (req, res) => {
       }
     }
 
-    const hasPhone = !!existingUser.phone;
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
     // Save OTP to database
@@ -553,50 +552,25 @@ export const forgotPassword = async (req, res) => {
       userId: existingUser._id,
       otp: otpCode,
       email: existingUser.email,
-      ...(hasPhone ? { phone: existingUser.phone } : {})
     });
 
     let emailSent = false;
-    let smsSent = false;
 
-    // Send OTP via EMAIL
+    // Send OTP via EMAIL only
     try {
       emailSent = await sendOtpEmail(existingUser.email, otpCode);
       console.log(`[EMAIL] OTP sent to ${existingUser.email}: ${otpCode}`);
     } catch (emailError) {
       console.error("Email OTP Send Error:", emailError);
+      return res.status(500).json({ message: "Failed to send OTP email. Please try again." });
     }
 
-    // Send OTP via SMS (if phone exists)
-    if (hasPhone) {
-      try {
-        await sendFast2Sms({
-          message: `Your OTP for password reset is ${otpCode}. Valid for 5 minutes.`,
-          numbers: existingUser.phone
-        });
-        smsSent = true;
-        console.log(`[SMS] OTP sent to ${existingUser.phone}: ${otpCode}`);
-      } catch (smsError) {
-        console.error("SMS OTP Send Error:", smsError);
-      }
-    }
-
-    // Provide appropriate response based on what was sent
-    let message = "";
-    if (emailSent && smsSent) {
-      message = "OTP sent to your registered email and mobile number.";
-    } else if (emailSent) {
-      message = "OTP sent to your registered email.";
-    } else if (smsSent) {
-      message = "OTP sent to your registered mobile number.";
-    } else {
-      message = "OTP generated. Check server logs for the code.";
+    if (!emailSent) {
+      return res.status(500).json({ message: "Failed to send OTP. Please try again." });
     }
 
     res.status(200).json({
-      message,
-      hasPhone,
-      phone: hasPhone ? existingUser.phone : null,
+      message: "OTP sent to your registered email.",
       email: existingUser.email
     });
 
