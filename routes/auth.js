@@ -16,7 +16,9 @@ import {
   forgotPasswordByPhone,
   transferPoints,
   changePassword,
-  Logout
+  Logout,
+  sendLanguageOtp,
+  verifyLanguageOtp
 } from "../controller/auth.js";
 
 const router = express.Router();
@@ -34,4 +36,6 @@ router.get("/getalluser", getallusers);
 router.get("/get-user/:id", getUser);
 router.post("/logout", Logout);
 router.patch("/update/:id", auth, updateprofile);
+router.post("/send-language-otp", sendLanguageOtp);
+router.post("/verify-language-otp", verifyLanguageOtp);
 export default router;

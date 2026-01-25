@@ -136,7 +136,7 @@ export const changePassword = async (req, res) => {
 export const forgotPasswordByPhone = async (req, res) => {
   const { phone } = req.body;
   if (!phone) return res.status(400).json({ message: "Phone number is required" });
-  
+
   try {
     const existingUser = await user.findOne({ phone });
     if (!existingUser) {
@@ -146,14 +146,14 @@ export const forgotPasswordByPhone = async (req, res) => {
     // Check daily limit
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
+
     if (existingUser.forgotPasswordAt) {
       const lastReset = new Date(existingUser.forgotPasswordAt);
       lastReset.setHours(0, 0, 0, 0);
-      
+
       if (lastReset.getTime() === today.getTime()) {
-        return res.status(429).json({ 
-          message: "You can only request password reset once per day. Please try again tomorrow." 
+        return res.status(429).json({
+          message: "You can only request password reset once per day. Please try again tomorrow."
         });
       }
     }
@@ -177,9 +177,9 @@ export const forgotPasswordByPhone = async (req, res) => {
       return res.status(500).json({ message: "Failed to send SMS OTP. Please try again later." });
     }
 
-    res.status(200).json({ 
+    res.status(200).json({
       message: "OTP sent to your mobile number.",
-      phone: existingUser.phone 
+      phone: existingUser.phone
     });
   } catch (error) {
     console.error("Forgot Password (phone) Error:", error);
@@ -253,7 +253,7 @@ export const Signup = async (req, res) => {
       console.log("User already exists:", email);
       return res.status(400).json({ message: "User already exist" });
     }
-    
+
     if (phone) {
       phone = String(phone).replace(/\D/g, "");
       if (phone.length < 10) {
@@ -269,7 +269,7 @@ export const Signup = async (req, res) => {
       let baseHandle = name.toLowerCase().replace(/\s+/g, "");
       handle = baseHandle;
       let counter = 1;
-      
+
       while (await user.findOne({ handle })) {
         handle = `${baseHandle}${counter}`;
         counter++;
@@ -318,9 +318,10 @@ export const Signup = async (req, res) => {
     setAuthCookie(res, token);
 
     console.log("Signup successful for:", email);
-    res.status(200).json({ 
+    res.status(200).json({
       data: newuser,
-      token: token
+      token: token,
+      userId: newuser._id
     });
   } catch (error) {
     console.error("Signup Error Detail:", error);
@@ -391,7 +392,7 @@ export const Login = async (req, res) => {
 
     setAuthCookie(res, token);
 
-    res.status(200).json({ 
+    res.status(200).json({
       data: exisitinguser,
       token: token
     });
@@ -426,7 +427,7 @@ export const verifyOTP = async (req, res) => {
 
     setAuthCookie(res, token);
 
-    res.status(200).json({ 
+    res.status(200).json({
       data: exisitinguser,
       token: token
     });
@@ -442,7 +443,7 @@ export const Logout = async (req, res) => {
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
     path: '/',
   });
-  
+
   res.status(200).json({ message: "Logged out successfully" });
 };
 
@@ -519,7 +520,7 @@ export const verifyPhoneEmail = async (req, res) => {
 // UPDATED: Forgot Password - Send OTP to EMAIL only (user chose email method)
 export const forgotPassword = async (req, res) => {
   const { email } = req.body;
-  
+
   if (!email) {
     return res.status(400).json({ message: "Email is required" });
   }
@@ -533,14 +534,14 @@ export const forgotPassword = async (req, res) => {
     // Check daily limit
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    
+
     if (existingUser.forgotPasswordAt) {
       const lastReset = new Date(existingUser.forgotPasswordAt);
       lastReset.setHours(0, 0, 0, 0);
-      
+
       if (lastReset.getTime() === today.getTime()) {
-        return res.status(429).json({ 
-          message: "You can only request password reset once per day. Please try again tomorrow." 
+        return res.status(429).json({
+          message: "You can only request password reset once per day. Please try again tomorrow."
         });
       }
     }
@@ -630,5 +631,73 @@ export const resetPasswordWithOtp = async (req, res) => {
   } catch (error) {
     console.error("Reset Password OTP Error:", error);
     res.status(500).json({ message: "Something went wrong during password reset" });
+  }
+};
+
+export const sendLanguageOtp = async (req, res) => {
+  const { userId, language } = req.body;
+  if (!userId || !language) {
+    return res.status(400).json({ message: "User ID and Language are required" });
+  }
+
+  try {
+    const existingUser = await user.findById(userId);
+    if (!existingUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    await Otp.create({
+      userId: existingUser._id,
+      otp: otpCode,
+      email: existingUser.email,
+      phone: existingUser.phone,
+    });
+
+    const langLower = language.toLowerCase();
+    if (langLower === "french" || langLower === "fr") {
+      if (!existingUser.email) {
+        return res.status(400).json({ message: "Email not found for this user" });
+      }
+      await sendOtpEmail(existingUser.email, otpCode);
+      console.log(`[LANGUAGE SWITCH] OTP sent to ${existingUser.email} (Email) for French: ${otpCode}`);
+      return res.status(200).json({ message: "OTP sent to your email for French verification.", method: "email" });
+    } else {
+      if (!existingUser.phone) {
+        return res.status(400).json({ message: "Phone number not found for this user" });
+      }
+      try {
+        await sendFast2Sms({
+          message: `Your OTP for language switch is ${otpCode}.`,
+          numbers: existingUser.phone,
+        });
+        console.log(`[LANGUAGE SWITCH] OTP sent to ${existingUser.phone} (SMS): ${otpCode}`);
+        return res.status(200).json({ message: "OTP sent to your mobile number.", method: "mobile" });
+      } catch (smsError) {
+        console.error("Fast2SMS Error:", smsError);
+        // Fallback for development if SMS fails
+        console.log(`[DEBUG] FAILED TO SEND SMS, OTP IS: ${otpCode}`);
+        return res.status(200).json({ message: "[DEBUG] SMS failed, OTP logged to console.", method: "mobile", debugOtp: otpCode });
+      }
+    }
+  } catch (error) {
+    console.error("Send Language OTP Error:", error);
+    res.status(500).json({ message: "Something went wrong" });
+  }
+};
+
+export const verifyLanguageOtp = async (req, res) => {
+  const { userId, otp } = req.body;
+  try {
+    const otpRecord = await Otp.findOne({ userId, otp });
+    if (!otpRecord) {
+      return res.status(400).json({ message: "Invalid or expired OTP" });
+    }
+
+    await Otp.deleteOne({ _id: otpRecord._id });
+    res.status(200).json({ message: "Language switch verified successfully" });
+  } catch (error) {
+    console.error("Verify Language OTP Error:", error);
+    res.status(500).json({ message: "Verification failed" });
   }
 };
