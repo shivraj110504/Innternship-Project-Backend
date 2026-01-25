@@ -113,7 +113,7 @@ export const likePost = async (req, res) => {
     const { id } = req.params;
 
     const post = await Post.findById(id).populate("userId", "name handle");
-    
+
     if (!post) {
       return res.status(404).json({ message: "Post not found" });
     }
@@ -222,9 +222,13 @@ export const commentPost = async (req, res) => {
       }
     }
 
+    // Fetch the updated post with all fields
+    const updatedPost = await Post.findById(id).populate("userId", "name handle").lean();
+
     res.status(200).json({
       message: "Comment added",
-      comments: post.comments,
+      post: updatedPost,
+      comments: updatedPost.comments,
     });
   } catch (error) {
     console.error("Comment post error:", error);
@@ -245,9 +249,13 @@ export const sharePost = async (req, res) => {
     post.shares = (post.shares || 0) + 1;
     await post.save();
 
+    // Fetch the updated post
+    const updatedPost = await Post.findById(id).populate("userId", "name handle").lean();
+
     res.status(200).json({
       message: "Post shared successfully",
-      shares: post.shares,
+      post: updatedPost,
+      shares: updatedPost.shares,
     });
   } catch (error) {
     console.error("Share post error:", error);
@@ -325,23 +333,23 @@ export const getPostingStats = async (req, res) => {
       dailyLimit = friendsCount;
     }
 
-    const canPost = friendsCount === 0 
-      ? false 
+    const canPost = friendsCount === 0
+      ? false
       : (dailyLimit === Infinity || postsToday < dailyLimit);
 
     res.status(200).json({
       friendsCount,
       postsToday,
       dailyLimit: dailyLimit === Infinity ? "Unlimited" : dailyLimit,
-      remainingPosts: dailyLimit === Infinity 
-        ? "Unlimited" 
+      remainingPosts: dailyLimit === Infinity
+        ? "Unlimited"
         : Math.max(0, dailyLimit - postsToday),
       canPost,
       message: friendsCount === 0
         ? "You need at least 1 friend to post"
         : canPost
-        ? "You can create a post"
-        : `Daily limit reached (${dailyLimit} posts with ${friendsCount} friends)`,
+          ? "You can create a post"
+          : `Daily limit reached (${dailyLimit} posts with ${friendsCount} friends)`,
     });
   } catch (error) {
     console.error("Get posting stats error:", error);
