@@ -478,6 +478,13 @@ export const confirmFriendRequest = async (req, res) => {
       fromUserId: userId,
     });
 
+    // Delete the original FRIEND_REQUEST notification received by this user
+    await Notification.deleteOne({
+      userId: userId,
+      fromUserId: friendId,
+      type: "FRIEND_REQUEST"
+    });
+
     console.log("✅ Friend request confirmed successfully");
     res.status(200).json({ message: "Friend request confirmed" });
   } catch (error) {
@@ -522,6 +529,13 @@ export const rejectFriendRequest = async (req, res) => {
 
     await user.save();
     await friend.save();
+
+    // Delete the original FRIEND_REQUEST notification received by this user
+    await Notification.deleteOne({
+      userId: userId,
+      fromUserId: friendId,
+      type: "FRIEND_REQUEST"
+    });
 
     console.log("✅ Friend request rejected successfully");
     res.status(200).json({ message: "Friend request rejected" });
@@ -667,11 +681,53 @@ export const markNotificationsRead = async (req, res) => {
   try {
     const userId = req.userid;
 
+    // Delete all general notifications that were already seen/read
+    // except friend requests which should stay until acted upon
+    await Notification.deleteMany({
+      userId,
+      read: true,
+      type: { $ne: "FRIEND_REQUEST" }
+    });
+
+    // Mark current unread as read (they will be deleted next time they are marked read)
     await Notification.updateMany({ userId, read: false }, { read: true });
 
-    res.status(200).json({ message: "Notifications marked as read" });
+    res.status(200).json({ message: "Notifications updated and cleaned" });
   } catch (error) {
     console.error("Mark notifications read error:", error);
     res.status(500).json({ message: "Failed to mark notifications as read" });
+  }
+};
+
+// Delete specific notification
+export const deleteNotification = async (req, res) => {
+  try {
+    const userId = req.userid;
+    const { id } = req.params;
+
+    const result = await Notification.deleteOne({ _id: id, userId });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+
+    res.status(200).json({ message: "Notification deleted" });
+  } catch (error) {
+    console.error("Delete notification error:", error);
+    res.status(500).json({ message: "Failed to delete notification" });
+  }
+};
+
+// Clear all notifications
+export const clearAllNotifications = async (req, res) => {
+  try {
+    const userId = req.userid;
+
+    await Notification.deleteMany({ userId });
+
+    res.status(200).json({ message: "All notifications cleared" });
+  } catch (error) {
+    console.error("Clear notifications error:", error);
+    res.status(500).json({ message: "Failed to clear notifications" });
   }
 };

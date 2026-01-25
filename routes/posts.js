@@ -21,6 +21,8 @@ import {
   searchUsers,
   getNotifications,
   markNotificationsRead,
+  deleteNotification,
+  clearAllNotifications,
 } from "../controller/post.js";
 
 const router = express.Router();
@@ -41,6 +43,8 @@ router.delete("/friend/:friendId", auth, removeFriend);
 // Notification routes (MUST be before /:id)
 router.get("/notifications", auth, getNotifications);
 router.patch("/notifications/read", auth, markNotificationsRead);
+router.delete("/notifications/:id", auth, deleteNotification);
+router.delete("/notifications", auth, clearAllNotifications);
 
 // Post routes
 router.post("/create", auth, createPost);
