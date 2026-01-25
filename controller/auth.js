@@ -55,8 +55,8 @@ export const awardBadges = async (userId) => {
   }
 };
 
-const sendOtpEmail = async (email, otp) => {
-  console.log(`[RESEND] Attempting to send OTP email to: ${email}`);
+const sendOtpEmail = async (email, otp, purpose = "password_reset") => {
+  console.log(`[RESEND] Attempting to send ${purpose} OTP email to: ${email}`);
 
   const resendApiKey = process.env.RESEND_API_KEY;
 
@@ -68,15 +68,33 @@ const sendOtpEmail = async (email, otp) => {
 
   const resend = new Resend(resendApiKey);
 
+  let subject = "Your StackOverflow OTP";
+  let title = "Verification Code";
+  let message = "Your OTP is:";
+
+  if (purpose === "password_reset") {
+    subject = "Your Password Reset OTP";
+    title = "Password Reset Request";
+    message = "Your OTP for password reset is:";
+  } else if (purpose === "login") {
+    subject = "Your Login Verification OTP";
+    title = "Login Verification";
+    message = "Your OTP for account login is:";
+  } else if (purpose === "language_switch") {
+    subject = "Your Language Switch OTP";
+    title = "Language Change Verification";
+    message = "Your OTP for switching language to French is:";
+  }
+
   try {
     const response = await resend.emails.send({
       from: "StackOverflow <auth@shivrajtaware.in>",
       to: email,
-      subject: "Your Password Reset OTP",
+      subject: subject,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #333;">Password Reset Request</h2>
-          <p>Your OTP for password reset is:</p>
+          <h2 style="color: #333;">${title}</h2>
+          <p>${message}</p>
           <div style="background: #f0f0f0; padding: 15px; text-align: center; margin: 20px 0;">
             <h1 style="color: #4F46E5; letter-spacing: 5px; margin: 0;">${otp}</h1>
           </div>
@@ -370,7 +388,7 @@ export const Login = async (req, res) => {
         email: exisitinguser.email,
       });
 
-      sendOtpEmail(exisitinguser.email, otpCode);
+      sendOtpEmail(exisitinguser.email, otpCode, "login");
       recordLoginHistory(req, exisitinguser._id, "OTP", "PENDING_OTP");
 
       console.log(`>>> SECURITY LOG: OTP for ${exisitinguser.email} is [ ${otpCode} ] <<<`);
@@ -559,7 +577,7 @@ export const forgotPassword = async (req, res) => {
 
     // Send OTP via EMAIL only
     try {
-      emailSent = await sendOtpEmail(existingUser.email, otpCode);
+      emailSent = await sendOtpEmail(existingUser.email, otpCode, "password_reset");
       console.log(`[EMAIL] OTP sent to ${existingUser.email}: ${otpCode}`);
     } catch (emailError) {
       console.error("Email OTP Send Error:", emailError);
@@ -659,7 +677,7 @@ export const sendLanguageOtp = async (req, res) => {
       if (!existingUser.email) {
         return res.status(400).json({ message: "Email not found for this user" });
       }
-      await sendOtpEmail(existingUser.email, otpCode);
+      await sendOtpEmail(existingUser.email, otpCode, "language_switch");
       console.log(`[LANGUAGE SWITCH] OTP sent to ${existingUser.email} (Email) for French: ${otpCode}`);
       return res.status(200).json({ message: "OTP sent to your email for French verification.", method: "email" });
     } else {
